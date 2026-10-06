@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 function element(tag,text,cls){const e=document.createElement(tag); e.textContent=text; if(cls)e.className=cls; return e;}
-async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Snooze-Token':$('token').value},body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw new Error(data.error);return data;}
+async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw new Error(data.error);return data;}
 async function refresh(){try{const r=await fetch('/api/state');if(!r.ok)throw new Error('Status unavailable');const s=await r.json();$('health').textContent=`${s.project} · updated ${new Date().toLocaleTimeString()}`;
 $('summary').replaceChildren(element('div',`${s.workers.length} tracked assignments`,'metric'),element('div',`${s.incidents.length} incidents`,'metric'));
 const groups={};for(const w of s.workers){if(w.state==='complete'&&!$('history').checked)continue;const key=w.server_key||`Legacy account ${w.account??'unknown'} · identity unverified`;(groups[key]??=[]).push(w);}

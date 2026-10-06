@@ -3,6 +3,10 @@ from snooze.web import authorized, safe_link
 
 
 class WebTests(unittest.TestCase):
+    def test_same_origin_cookie_controls_do_not_require_pasting_secret(self):
+        self.assertTrue(authorized({'Origin': 'http://localhost:8765', 'Cookie': 'snooze_control=ok'}, 'localhost:8765', 'ok'))
+        self.assertFalse(authorized({'Origin': 'https://evil.test', 'Cookie': 'snooze_control=ok'}, 'localhost:8765', 'ok'))
+
     def test_cross_origin_and_missing_token_rejected(self):
         self.assertFalse(authorized({'Origin': 'https://evil.test', 'X-Snooze-Token': 'ok'}, 'localhost:8765', 'ok'))
         self.assertFalse(authorized({}, 'localhost:8765', 'ok'))

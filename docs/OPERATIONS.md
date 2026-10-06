@@ -2,7 +2,7 @@
 
 Use separate `--state` directories for projects. `init` registers a repository and optional read-only JSON queue. Existing files are never modified by queue import. Do not rerun init on existing state until custom ownership mapping is backed up.
 
-`serve` runs the web view and periodic observations in one process, guarded by an exclusive state lock. `check` cannot acquire the lock while serve owns it: use dashboard Check now. A local control token and exact same-origin request are required for dashboard mutations.
+`serve` runs the web view and periodic observations in one process, guarded by an exclusive state lock. `check` cannot acquire the lock while serve owns it: use dashboard Check now. A local HttpOnly SameSite=Strict cookie and exact same-origin request are required for dashboard mutations. Programmatic requests may alternatively send the control token in X-Snooze-Token with the correct Origin.
 
 The current monitor does not dispatch/resume/cancel anything. It can coexist with a legacy dispatcher in observation-only mode. Never enable future recovery in two controllers simultaneously. The original supervisor remains responsible for scheduling until a documented exclusive handover.
 

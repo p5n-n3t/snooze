@@ -3,12 +3,20 @@ import hmac
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import SimpleCookie, CookieError
 from pathlib import Path
 from urllib.parse import urlparse
 
 
 def authorized(headers, host, token):
-    return headers.get('Origin') == 'http://' + host and hmac.compare_digest(headers.get('X-Snooze-Token', ''), token)
+    supplied = headers.get('X-Snooze-Token', '')
+    if not supplied:
+        try:
+            cookies = SimpleCookie(headers.get('Cookie', ''))
+            supplied = cookies['snooze_control'].value if 'snooze_control' in cookies else ''
+        except CookieError:
+            return False
+    return headers.get('Origin') == 'http://' + host and hmac.compare_digest(supplied, token)
 
 
 def safe_link(value):
@@ -48,6 +56,8 @@ def serve(store, project, monitor, token, port=8765):
             self.send_response(200)
             self.send_header('Content-Type', {'index.html': 'text/html', 'app.js': 'text/javascript', 'style.css': 'text/css'}[filename])
             self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+            if path == '/':
+                self.send_header('Set-Cookie', f'snooze_control={token}; HttpOnly; SameSite=Strict; Path=/')
             self.end_headers()
             self.wfile.write(content)
 

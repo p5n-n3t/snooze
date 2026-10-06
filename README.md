@@ -18,7 +18,7 @@ bash install.sh
 
 The installer uses a dedicated virtual environment; no sudo or system package changes. On a fresh system, install Python/venv using your operating system first. The server binds to 127.0.0.1:8765.
 
-Supported commands: init, serve, status, incidents, check, config. Use `--state PATH` before the command to select another project. Dashboard controls require the local token in STATE/control-token; paste it into the password field. Do not publish this token.
+Supported commands: init, serve, status, incidents, check, config. Use `--state PATH` before the command to select another project. Dashboard controls authenticate through a local HttpOnly, SameSite=Strict cookie; no manual token entry is needed. Do not publish STATE/control-token.
 
 ## What it shows
 
