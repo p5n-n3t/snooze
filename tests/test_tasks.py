@@ -76,3 +76,10 @@ class TaskTests(unittest.TestCase):
 
     def test_unsafe_scope_rejected(self):
         with self.assertRaises(ValueError): self.task('a', ('path:../../etc',))
+
+    def test_account_capacity_is_enforced_inside_reservation_transaction(self):
+        from snooze.providers import ProviderRegistry
+        ProviderRegistry(self.repo).upsert_public_config('a', {'capacity':1})
+        self.task('first', ('record:1',)); self.task('second', ('record:2',))
+        self.repo.reserve('first','a',('record:1',),100)
+        with self.assertRaises(ValueError): self.repo.reserve('second','a',('record:2',),100)

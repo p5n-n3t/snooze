@@ -120,10 +120,26 @@ class TaskRepository:
             if list(scopes) != sorted(task['spec']['scope_keys']): raise ValueError('Scope differs from approved assignment')
             for row in c.execute('SELECT scopes FROM attempts WHERE project=? AND released_at IS NULL', (task['project'],)):
                 if scopes_overlap(scopes, json.loads(row['scopes'])): raise ValueError('Active assignment scope conflict')
+            account = c.execute('SELECT data FROM provider_configs WHERE id=?', (account_id,)).fetchone()
+            if account:
+                capacity = json.loads(account['data']).get('capacity', 1)
+                occupied = c.execute('SELECT COUNT(*) FROM attempts WHERE account=? AND released_at IS NULL', (account_id,)).fetchone()[0]
+                if occupied >= capacity: raise ValueError('Account capacity occupied')
+            policy_row = c.execute('SELECT data FROM policy_settings WHERE project=?', (task['project'],)).fetchone()
+            policy = json.loads(policy_row['data']) if policy_row else {}
+            project_count = c.execute('SELECT COUNT(*) FROM attempts WHERE project=? AND released_at IS NULL', (task['project'],)).fetchone()[0]
+            total_count = c.execute('SELECT COUNT(*) FROM attempts WHERE released_at IS NULL').fetchone()[0]
+            if project_count >= policy.get('max_concurrent', 12) or total_count >= policy.get('global_concurrent', 24):
+                raise ValueError('Concurrency limit reached')
+            model = task['spec']['requirements'].get('model')
+            model_limit = policy.get('model_limits', {}).get(model)
+            if model_limit is not None:
+                model_count = sum(json.loads(r['data']).get('requested_model') == model for r in c.execute('SELECT data FROM attempts WHERE project=? AND released_at IS NULL', (task['project'],)))
+                if model_count >= model_limit: raise ValueError('Model concurrency limit reached')
             generation = c.execute('SELECT COALESCE(MAX(generation),0)+1 FROM attempts WHERE task=?', (task_id,)).fetchone()[0]
             attempt_id = uuid.uuid4().hex; key = uuid.uuid4().hex
-            c.execute('INSERT INTO attempts(id,task,project,account,generation,idempotency_key,state,scopes,started_at,lease_until) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                      (attempt_id, task_id, task['project'], account_id, generation, key, 'reserved', json.dumps(scopes), now, now + 600))
+            c.execute('INSERT INTO attempts(id,task,project,account,generation,idempotency_key,state,scopes,started_at,lease_until,data) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                      (attempt_id, task_id, task['project'], account_id, generation, key, 'reserved', json.dumps(scopes), now, now + 600, json.dumps({'requested_model': model})))
             c.execute('UPDATE tasks SET state="reserved",updated_at=?,revision=revision+1 WHERE id=?', (now, task_id))
             self.event(c, task['project'], 'attempt_reserved', {'account': account_id, 'generation': generation}, task_id, attempt_id, now)
             return AttemptReceipt(attempt_id, generation, key, None, 'reserved')
