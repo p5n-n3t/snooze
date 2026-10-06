@@ -1,5 +1,7 @@
 # Snooze
 
+![Snooze logo concept](docs/assets/snooze-logo-concept-v1.png)
+
 [![Tests](https://github.com/p5n-n3t/snooze/actions/workflows/test.yml/badge.svg)](https://github.com/p5n-n3t/snooze/actions/workflows/test.yml)
 
 Local-first visibility for distributed AI workers. A small web dashboard, durable observations and actionable incidents—without spending model tokens on monitoring.
@@ -7,6 +9,19 @@ Local-first visibility for distributed AI workers. A small web dashboard, durabl
 **Status: early observation-only preview.** Automatic recovery, capacity-aware dispatch and universal agent wake-up are not implemented. Do not use this version as proof that a worker completed its assignment.
 
 ## Install and run
+
+### Already installed on JQ's machine
+
+Open **http://127.0.0.1:8765/**. The existing user service is `snooze.service`:
+
+```bash
+systemctl --user start snooze.service
+systemctl --user status snooze.service
+```
+
+Do not open `snooze/static/index.html` directly: a `file://` URL bypasses the backend and cannot load the dashboard correctly. Do not run `init` again over an existing project configuration; it would replace project bindings. Do not start a second server while the service owns the state.
+
+### Fresh installation
 
 Python 3.11+ required. From this checkout:
 
@@ -38,3 +53,9 @@ python3 -m unittest discover -v
 ```
 
 Read [the design](docs/superpowers/specs/2026-10-07-snooze-monitor-design.md), [roadmap](docs/ROADMAP.md), [adapter contract](docs/ADAPTERS.md) and [operations guide](docs/OPERATIONS.md). Original code is Apache-2.0; see THIRD_PARTY_NOTICES.md. Never commit state, credentials, task data or private account identities.
+
+## Scheduler-first redesign
+
+The [new written specification](docs/superpowers/specs/2026-10-07-snooze-command-centre-design.md) is awaiting review before implementation. It proposes a polished Tokyo Nights dark/light command centre, durable approved-queue scheduling, manual intervention, provider configuration and deep project/usage history. The architectural direction is approved; the dashboard rebuild is **not implemented yet**.
+
+Read the [pinned source-level reuse audit](docs/research/2026-10-07-upstream-reuse-audit.md) for AgentsView, kit-ui, Paperclip and Hatchet. The [logo concept and generation prompt](docs/assets/BRAND-CONCEPT.md) are saved separately. No source from those four projects is vendored in the current preview.
