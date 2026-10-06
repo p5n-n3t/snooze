@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.superpowers/
+.snooze/
+*.sqlite*
+.venv/
+*.egg-info/
