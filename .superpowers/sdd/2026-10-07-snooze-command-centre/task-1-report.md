@@ -31,6 +31,22 @@ Result: all 23 in-scope tests passed (16 existing plus 7 new). `git diff --check
 - `tests/test_views.py` — projection and detail tests.
 - `tests/test_web.py` — API authorization, health, origin, and static-path tests.
 
+## Review fix — legacy private reads
+
+Closed the Important Task 1 review finding by applying private-read authorization to legacy `GET /api/state` and `GET /api/incidents`. Browser cookie reads support same-origin `Sec-Fetch-Site` or same-origin `Referer` when normal GET requests omit `Origin`; an explicit foreign `Origin` is rejected. CLI `X-Snooze-Token` reads require the exact same-origin `Origin`, and mutations retain their existing exact-Origin authorization. The health endpoint remains public and metadata-only.
+
+### RED
+
+Command: `python3 -m unittest tests.test_web.WebTests.test_legacy_private_reads_require_same_auth_as_v2 -v`
+
+Result before the route change: failed as expected for all six unauthorized requests (missing credentials and cross-origin cookie/token requests on both legacy endpoints).
+
+### GREEN
+
+Command: `python3 -m unittest tests.test_web -v`
+
+Result after the route change: all 7 focused web tests passed, including absent-Origin browser cookie reads via same-origin fetch metadata and Referer, foreign-origin rejection, and CLI-token reads for both legacy endpoints. `git diff --check` passed.
+
 ## Notes
 
 No cycle timestamps are available in the unchanged Store snapshot, so the projection reports null cycle timestamps instead of synthesizing a cadence. Dispatch remains unsupported; no cloud worker or external ownership capability was advertised by account discovery. No service restart, global configuration, Neon operation, or push was performed.

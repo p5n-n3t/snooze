@@ -24,6 +24,27 @@ def authorized(headers, host, token):
     return headers.get('Origin') == 'http://' + host and hmac.compare_digest(supplied, token)
 
 
+def authorized_read(headers, host, token):
+    supplied = headers.get('X-Snooze-Token', '')
+    if supplied:
+        return headers.get('Origin') == 'http://' + host and hmac.compare_digest(supplied, token)
+    try:
+        cookies = SimpleCookie(headers.get('Cookie', ''))
+        supplied = cookies['snooze_control'].value if 'snooze_control' in cookies else ''
+    except CookieError:
+        return False
+    if not supplied or not hmac.compare_digest(supplied, token):
+        return False
+    origin = headers.get('Origin')
+    if origin is not None:
+        return origin == 'http://' + host
+    if headers.get('Sec-Fetch-Site') == 'same-origin':
+        return True
+    referer = headers.get('Referer', '')
+    parsed_referer = urlparse(referer)
+    return parsed_referer.scheme == 'http' and parsed_referer.netloc == host
+
+
 def safe_link(value):
     parsed = urlparse(value)
     return value if parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password else None
@@ -71,8 +92,12 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
                 detail = task_detail(store, project, task_id)
                 return self.send(detail if detail is not None else {'error': 'Not found'}, 200 if detail is not None else 404)
             if path == '/api/state':
+                if not authorized_read(self.headers, host, token):
+                    return self.send({'error': 'Origin and control token required'}, 403)
                 return self.send(store.snapshot(project))
             if path == '/api/incidents':
+                if not authorized_read(self.headers, host, token):
+                    return self.send({'error': 'Origin and control token required'}, 403)
                 return self.send(store.snapshot(project)['incidents'])
             relative = 'index.html' if path == '/' else unquote(path).lstrip('/')
             if not relative or '\\' in relative or '\x00' in relative:
