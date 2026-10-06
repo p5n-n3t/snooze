@@ -1,0 +1,91 @@
+"""Public connection settings and private transport references, not raw MCP config."""
+import json
+import math
+import time
+from snooze.domain import AccountSnapshot
+from snooze.adapters.registered import RegisteredAdapter
+from snooze.adapters.lightsprint import LightSprintAdapter
+
+
+PUBLIC_FIELDS = {'label','adapter','enabled','capacity','models','efforts','priority','tools','privacy','quality','reserve','allow_unknown_quota','quota_override','cooldown_until'}
+BACKEND_FIELDS = {'mcp_key','workspace_id','stack_id','repo_id','verified_capacity','verified_operations','launch_verified','health'}
+ADAPTERS = {'lightsprint','local','native','ssh','tailscale','ollama','v0','figma','external'}
+
+
+class ProviderRegistry:
+    def __init__(self, repository, transport=None):
+        self.repo = repository
+        self.transport = transport
+        self.overrides = {}
+
+    def get(self, id):
+        with self.repo.connection() as c:
+            row = c.execute('SELECT * FROM provider_configs WHERE id=?', (id,)).fetchone()
+            return {**json.loads(row['data']), 'revision': row['revision']} if row else None
+
+    def upsert_public_config(self, account_id, values, *, trusted=False):
+        if not isinstance(values, dict) or set(values) - (PUBLIC_FIELDS | (BACKEND_FIELDS if trusted else {'mcp_key','workspace_id'})):
+            raise ValueError('Unknown/private configuration fields')
+        current = self.get(account_id) or {'id': account_id, 'label': account_id, 'adapter': 'lightsprint', 'enabled': True, 'capacity': 12, 'models': [], 'efforts': ['low'], 'reserve': 0, 'health': 'unknown'}
+        current.update(values)
+        if current['adapter'] not in ADAPTERS: raise ValueError('Unknown adapter')
+        capacity = current['capacity']
+        if type(capacity) is not int or not 1 <= capacity <= 100: raise ValueError('Capacity must be 1–100')
+        if current['adapter'] == 'lightsprint' and capacity > current.get('verified_capacity', 12): raise ValueError('Higher limit needs verified adapter evidence')
+        if type(current['enabled']) is not bool: raise ValueError('Enabled must be boolean')
+        if len(str(current['label'])) > 160: raise ValueError('Label too long')
+        for field in ('models','efforts','tools','privacy'):
+            value = current.get(field, [])
+            if not isinstance(value, list) or len(value) > 100 or any(not isinstance(v, str) or len(v) > 160 for v in value): raise ValueError('Invalid ' + field)
+        for field in ('reserve','priority','cooldown_until'):
+            value = current.get(field, 0)
+            if not isinstance(value, (int,float)) or isinstance(value,bool) or not math.isfinite(value) or (field != 'priority' and value < 0): raise ValueError('Invalid ' + field)
+        override = current.get('quota_override')
+        if override is not None:
+            if not isinstance(override, dict) or set(override) - {'value','unit','expires_at'}: raise ValueError('Invalid quota override')
+            value = override.get('value')
+            if not isinstance(value, (int,float)) or isinstance(value,bool) or not math.isfinite(value) or value < 0: raise ValueError('Invalid quota value')
+            expiry = override.get('expires_at')
+            if expiry is not None and (not isinstance(expiry,(int,float)) or not math.isfinite(expiry)): raise ValueError('Invalid quota expiration')
+            current['quota_override'] = {**override, 'source':'operator', 'observed_at':time.time()}
+        current.pop('revision', None)
+        with self.repo.connection(True) as c:
+            c.execute('INSERT INTO provider_configs(id,data,revision) VALUES(?,?,1) ON CONFLICT(id) DO UPDATE SET data=excluded.data,revision=revision+1', (account_id,json.dumps(current)))
+            self.repo.event(c, 'system', 'account_configured', {'account':account_id})
+        return self.public(self.get(account_id))
+
+    def adapter(self, id):
+        if id in self.overrides: return self.overrides[id]
+        config = self.get(id)
+        if not config: raise ValueError('Unknown account')
+        if config['adapter'] == 'lightsprint' and self.transport is not None: return LightSprintAdapter(config, self.transport)
+        return RegisteredAdapter(config)
+
+    def public(self, config):
+        return {**{k:config.get(k) for k in PUBLIC_FIELDS}, 'id':config['id'], 'revision':config.get('revision',0), 'identity':None, 'quota':self.snapshot(config['id']).quota, 'health':config.get('health','unknown'), 'capabilities':self.adapter(config['id']).capabilities()}
+
+    def list_public(self):
+        with self.repo.connection() as c: ids = [r['id'] for r in c.execute('SELECT id FROM provider_configs ORDER BY id')]
+        return [self.public(self.get(id)) for id in ids]
+
+    def snapshot(self, id, now=None):
+        config = self.get(id)
+        if config is None: raise ValueError('Unknown account')
+        now = time.time() if now is None else now
+        quota = config.get('quota_override')
+        if quota and quota.get('expires_at') is not None and quota['expires_at'] <= now: quota = None
+        return AccountSnapshot(id, config['enabled'], config['capacity'], None, self.adapter(id).capabilities(), tuple(config.get('models',[])), quota, config.get('health','unknown'))
+
+    def bind(self, id, mcp_key, observed_workspaces):
+        config = self.get(id)
+        if not config or not config.get('workspace_id') or config['workspace_id'] not in observed_workspaces: raise ValueError('Workspace ownership unverified')
+        return self.upsert_public_config(id, {'mcp_key':mcp_key}, trusted=True)
+
+    def test_connection(self, id):
+        config = self.get(id)
+        if config['adapter'] != 'lightsprint' or self.transport is None: return self.snapshot(id)
+        result = self.transport.request(config['mcp_key'], 'GET', '/api/repos')
+        workspaces = {r.get('workspaceId') for r in result.get('repos',[]) if isinstance(r,dict)}
+        if config.get('workspace_id') and config['workspace_id'] not in workspaces: raise ValueError('Configured workspace not accessible')
+        self.upsert_public_config(id, {'health':'healthy'}, trusted=True)
+        return self.snapshot(id)
