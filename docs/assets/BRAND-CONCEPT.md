@@ -1,0 +1,11 @@
+# Snooze logo concept v1
+
+Generated 2026-10-07 with the built-in image-generation tool. Asset: `snooze-logo-concept-v1.png`, 1983 × 793 RGBA PNG. Inspection confirmed non-opaque alpha and transparent corners; the wordmark reads **Snooze**.
+
+The crescent/alarm-clock is the vigilant scheduler; the connected worker nodes represent delegated execution. Cyan, periwinkle, violet and pink match the proposed Tokyo Nights palette. The ink wordmark and lavender keyline are intended for both light and dark surfaces.
+
+Status: logo concept, supplied independently of the unimplemented dashboard rebuild. This is a raster asset, not a vector source. Do not present the dashboard redesign as complete because the logo exists.
+
+## Generation prompt
+
+> Use case: logo-brand. Asset type: main logo for Snooze open-source AI worker scheduler dashboard and GitHub repository. Create ONE polished, original horizontal icon-and-wordmark logo on genuinely transparent background. Text exactly "Snooze" (capital S, lowercase n o o z e), no other text. Concept: a sleepy but vigilant alarm-clock/crescent-moon control hub, a beautifully simple crescent forming the circular clock body, small alarm bells and three clean circuit/connection lines terminating in worker nodes. Communicate restful oversight, wake-ups and distributed orchestration, not a generic AI brain. Strong compact silhouette, flat vector-style crisp clean edges, tasteful rounded geometry, excellent balanced negative space, scalable icon, mature friendly playful engineering product identity. Sleepy funky neon Tokyo Nights palette: electric cyan #7dcfff, periwinkle #7aa2f7, soft violet #bb9af7, tiny hot pink #f7768e accents, rich ink #1a1b26 for outlines and wordmark so it also reads on white; thin lavender keyline for dark backgrounds. Wordmark custom rounded geometric sans with subtle personality, highly readable, not graffiti. Icon on left, wordmark to right, comfortable spacing, large within canvas with clean transparent margins. No glow haze, no background rectangle, no checkerboard painted into image, no 3D rendering, no mockup, no extra variants, no slogans, no watermark. This is a logo concept for the redesign; it must feel precise and premium.
