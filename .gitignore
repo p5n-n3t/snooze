@@ -5,3 +5,6 @@ __pycache__/
 *.sqlite*
 .venv/
 *.egg-info/
+build/
+.playwright-cli/
+output/

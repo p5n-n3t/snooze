@@ -5,6 +5,22 @@ from snooze.store import Store
 
 
 class StoreTests(unittest.TestCase):
+    def test_superseded_incident_is_retired_when_status_changes(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Store(Path(d) / 's.db')
+            s.incident('p', 'a', 'ownership_unknown', 'Unmapped')
+            s.retire_other_incidents('p', 'a', 'idle')
+            self.assertEqual(s.snapshot('p')['incidents'], [])
+
+    def test_nested_legacy_observation_never_exposes_private_provider_fields(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Store(Path(d) / 's.db')
+            s.ingest_jobs('p', [{'id': 'a', 'session_id': 's'}])
+            s.observe('s', {'status': {'sessionStatus': 'idle', 'credentialRef': 'sensitive-marker'}})
+            result = s.snapshot('p')
+            self.assertNotIn('sensitive-marker', str(result))
+            self.assertEqual(result['workers'][0]['observation']['status'], 'idle')
+
     def test_import_is_idempotent_and_stale_until_observed(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / 'state.db'

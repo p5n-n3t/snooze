@@ -22,7 +22,7 @@ Potential fleet MCP gateway location: locally or a small EC2 machine; exact sizi
 
 Route repetitive extraction, normalization, counting, checks and long-running bounded work toward capable remote workers. Use stronger cloud models for ambiguous reasoning, creative work and review. Scheduling considers task requirements, measured worker quality, quota/cost, concurrency, dependencies, latency and data privacy. Preserve safety reserves, explicit budget ceilings, deterministic assignments and a single owner. More slots are useful only when independent work exists.
 
-LightSprint MCP names: lightsprint-1-joeyqleq, lightsprint-2-ngilfordz, lightsprint-3-jqleq, lightsprint-4-chupalopez, lightsprint-5-elleparker, lightsprint-6-niandran, lightsprint-7-l2thepete, lightsprint-8-p0y50n, lightsprint-9-zhaddadz. These are configuration labels, not authenticated identity evidence. Account 1 is reported depleted this month; account 2 may be depleted; verify the rest. Monthly refresh does not imply a known reset timestamp. Display occupied rows only. Default 12 maximum reservations per account; higher limits require provider/model/account confirmation.
+LightSprint MCP naming convention: lightsprint-N-username, currently nine configured accounts. Private usernames belong in local configuration, not this public document. These are configuration labels, not authenticated identity evidence. Account 1 is reported depleted this month; account 2 may be depleted; verify the rest. Monthly refresh does not imply a known reset timestamp. Display occupied rows only. Default 12 maximum reservations per account; higher limits require provider/model/account confirmation.
 
 ## Phase 4 — universal integrations
 

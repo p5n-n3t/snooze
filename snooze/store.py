@@ -3,6 +3,7 @@ import json
 import sqlite3
 import time
 from pathlib import Path
+from snooze.transport import normalize_status
 
 
 class Store:
@@ -27,6 +28,7 @@ class Store:
                           (project_id, job['id'], job.get('session_id', ''), json.dumps(job)))
 
     def observe(self, session_id: str, observation: dict) -> None:
+        observation = normalize_status(observation)
         with self.connect() as c:
             c.execute('INSERT INTO observations VALUES(?,?,?)', (session_id, time.time(), json.dumps(observation)))
 
@@ -38,6 +40,10 @@ class Store:
     def ack(self, project, job, kind):
         with self.connect() as c:
             c.execute('UPDATE incidents SET acked=1 WHERE project=? AND job=? AND kind=?', (project, job, kind))
+
+    def retire_other_incidents(self, project, job, current_kind):
+        with self.connect() as c:
+            c.execute('UPDATE incidents SET acked=1 WHERE project=? AND job=? AND kind != ?', (project, job, current_kind))
 
     def settings(self, project):
         with self.connect() as c:
@@ -56,7 +62,7 @@ class Store:
             for session, data in c.execute('SELECT session,data FROM jobs WHERE project=? ORDER BY id', (project_id,)):
                 job = json.loads(data)
                 row = c.execute('SELECT at,data FROM observations WHERE session=? ORDER BY rowid DESC LIMIT 1', (session,)).fetchone()
-                job['observation'] = json.loads(row[1]) if row else None
+                job['observation'] = normalize_status(json.loads(row[1])) if row else None
                 job['observed_at'] = row[0] if row else None
                 job['observation_status'] = ('fresh' if time.time() - row[0] < 600 else 'stale') if row else 'unobserved'
                 workers.append(job)
