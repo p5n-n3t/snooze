@@ -76,4 +76,3 @@ class TaskTests(unittest.TestCase):
 
     def test_unsafe_scope_rejected(self):
         with self.assertRaises(ValueError): self.task('a', ('path:../../etc',))
-
