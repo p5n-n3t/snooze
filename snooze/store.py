@@ -4,6 +4,15 @@ import sqlite3
 import time
 from pathlib import Path
 from snooze.transport import normalize_status
+from snooze.migrations import migrate_state
+
+
+class ClosingConnection(sqlite3.Connection):
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
 
 
 class Store:
@@ -17,9 +26,10 @@ class Store:
               CREATE TABLE IF NOT EXISTS incidents(project TEXT,job TEXT,kind TEXT,message TEXT,at REAL,acked INTEGER DEFAULT 0,PRIMARY KEY(project,job,kind));
               CREATE TABLE IF NOT EXISTS settings(project TEXT PRIMARY KEY,data TEXT);
             ''')
+        migrate_state(self.path)
 
     def connect(self):
-        return sqlite3.connect(self.path, timeout=10)
+        return sqlite3.connect(self.path, timeout=10, factory=ClosingConnection)
 
     def ingest_jobs(self, project_id: str, jobs: list[dict]) -> None:
         with self.connect() as c:
