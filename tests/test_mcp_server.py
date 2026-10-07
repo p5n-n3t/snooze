@@ -1,11 +1,19 @@
 import tempfile
 import unittest
+import io
 from pathlib import Path
 from snooze.tasks import TaskRepository
 from snooze.mcp_server import MCPFacade
 
 
 class MCPTests(unittest.TestCase):
+    def test_malformed_messages_do_not_kill_stdio_consumer(self):
+        with tempfile.TemporaryDirectory() as d:
+            facade=MCPFacade(TaskRepository(Path(d)/'s.sqlite'),None,'private',['p'])
+            output=io.StringIO()
+            facade.serve_stdio(io.StringIO('1\n[]\n{"id":2,"method":"tools/call","params":[]}\n{"id":3,"method":"tools/list"}\n'),output)
+            self.assertIn('"id": 3',output.getvalue())
+
     def test_tools_describe_required_control_and_acknowledgment_arguments(self):
         with tempfile.TemporaryDirectory() as d:
             facade=MCPFacade(TaskRepository(Path(d)/'s.sqlite'),None,'private',['p'])

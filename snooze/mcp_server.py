@@ -13,6 +13,7 @@ class MCPFacade:
 
     def call(self,tool,arguments,token):
         if not isinstance(token,str) or not hmac.compare_digest(token,self.token):raise PermissionError('Authentication required')
+        if not isinstance(arguments,dict):raise ValueError('Object arguments required')
         project=arguments.get('project')
         if project not in self.projects:raise PermissionError('Project is outside registered scope')
         if tool=='snapshot':
@@ -37,6 +38,7 @@ class MCPFacade:
         raise ValueError('Unknown/unsupported Snooze tool')
 
     def rpc(self,message):
+        if not isinstance(message,dict):return {'jsonrpc':'2.0','id':None,'error':{'code':-32600,'message':'Object request required'}}
         id=message.get('id');method=message.get('method')
         if method=='notifications/initialized':return None
         try:
@@ -52,7 +54,10 @@ class MCPFacade:
                     'inputSchema':{'type':'object','properties':{'project':{'type':'string'},**properties},'required':['project',*[k for k in properties if k not in optional.get(name,set())]],'additionalProperties':False}}
                     for name,properties in fields.items()]}
             elif method=='tools/call':
-                params=message['params'];name=params['name']
+                params=message['params']
+                if not isinstance(params,dict):raise ValueError('Object parameters required')
+                name=params['name']
+                if not isinstance(name,str):raise ValueError('Tool name required')
                 if not name.startswith('snooze_'):raise ValueError('Unknown tool')
                 value=self.call(name[7:],params.get('arguments',{}),self.token)
                 result={'content':[{'type':'text','text':json.dumps(value)}]}
