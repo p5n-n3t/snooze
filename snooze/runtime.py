@@ -87,7 +87,7 @@ class Runtime:
     def interval(self): return self.scheduler.settings(self.project)['interval']
 
     def _bridge_incidents(self, now, scheduler_errors=()):
-        workers = self.store.snapshot(self.project)['workers']
+        workers = self.store.active_snapshot(self.project)['workers']
         active=self.repo.active(self.project)
         errors={error.get('task') for error in scheduler_errors}
         for attempt in active:

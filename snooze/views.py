@@ -31,7 +31,7 @@ def _worker(snapshot, task_id):
 
 def dashboard_state(store, project_id: str, config: dict, now: float) -> dict:
     """Return a stable, private dashboard DTO without passing through raw jobs."""
-    snapshot = store.snapshot(project_id)
+    snapshot = getattr(store,'active_snapshot',store.snapshot)(project_id)
     config = config if isinstance(config, dict) else {}
     workers = [w for w in snapshot.get('workers', []) if isinstance(w, dict)]
     slots = []

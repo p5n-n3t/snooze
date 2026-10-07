@@ -64,10 +64,11 @@ class Store:
         with self.connect() as c:
             c.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(project) DO UPDATE SET data=excluded.data', (project, json.dumps(values)))
 
-    def snapshot(self, project_id: str) -> dict:
+    def snapshot(self, project_id: str, *, active_only=False) -> dict:
         workers = []
         with self.connect() as c:
-            for session, data in c.execute('SELECT session,data FROM jobs WHERE project=? ORDER BY id', (project_id,)):
+            where=" AND COALESCE(lower(json_extract(data,'$.state')),'') NOT IN ('complete','completed','done','cancelled','canceled','failed','draft','held','queued') AND session IS NOT NULL AND session!=''" if active_only else ''
+            for session, data in c.execute('SELECT session,data FROM jobs WHERE project=?'+where+' ORDER BY id', (project_id,)):
                 job = json.loads(data)
                 row = c.execute('SELECT at,data FROM observations WHERE session=? ORDER BY rowid DESC LIMIT 1', (session,)).fetchone()
                 job['observation'] = normalize_status(json.loads(row[1])) if row else None
@@ -76,6 +77,9 @@ class Store:
                 workers.append(job)
             incidents = [dict(zip(('job', 'kind', 'message', 'at'), r)) for r in c.execute('SELECT job,kind,message,at FROM incidents WHERE project=? AND acked=0', (project_id,))]
         return {'project': project_id, 'workers': workers, 'incidents': incidents, 'settings': self.settings(project_id)}
+
+    def active_snapshot(self, project_id):
+        return self.snapshot(project_id,active_only=True)
 
     def history_page(self, project, *, offset=0, limit=25, query=''):
         if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=100 or not isinstance(query,str) or len(query)>200:

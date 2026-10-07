@@ -20,7 +20,8 @@ class Monitor:
 
     def _check(self, project_id):
         started = time.time()
-        jobs = [j for j in self.store.snapshot(project_id)['workers'] if j.get('session_id') and j.get('state') != 'complete']
+        snapshot=getattr(self.store,'active_snapshot',self.store.snapshot)(project_id)
+        jobs = [j for j in snapshot['workers'] if j.get('session_id') and str(j.get('state','')).lower() not in ('complete','completed','done','cancelled','canceled','failed','draft','held','queued')]
 
         def check_one(job):
             try:

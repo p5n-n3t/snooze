@@ -5,6 +5,15 @@ from snooze.store import Store
 
 
 class StoreTests(unittest.TestCase):
+    def test_active_snapshot_skips_terminal_and_unassigned_rows_without_deleting_history(self):
+        with tempfile.TemporaryDirectory() as d:
+            s=Store(Path(d)/'s.db')
+            s.ingest_jobs('p',[{'id':'active','session_id':'s','state':'running'},
+                              {'id':'waiting','session_id':'w','state':'waiting'},
+                              {'id':'draft','state':'draft'},{'id':'queued','session_id':'q','state':'queued'},
+                              {'id':'finished','session_id':'f','state':'completed'}])
+            self.assertEqual({j['id'] for j in s.active_snapshot('p')['workers']},{'active','waiting'})
+            self.assertEqual(len(s.snapshot('p')['workers']),5)
     def test_superseded_incident_is_retired_when_status_changes(self):
         with tempfile.TemporaryDirectory() as d:
             s = Store(Path(d) / 's.db')
