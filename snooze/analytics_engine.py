@@ -335,6 +335,8 @@ class EngineClient:
             raise LookupError('response shape mismatch')
         if report_kind == 'usage_top_sessions':
             data = {'sessions': body}
+        elif report_kind == 'session_children':
+            data = {'children': body}
         else:
             data = body
         clean_data = self._sanitize(data)

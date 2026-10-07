@@ -34,6 +34,11 @@ class AnalyticsEngineTests(unittest.TestCase):
         self.assertEqual(report.state, 'unavailable')
         self.assertEqual(report.error_kind, 'not_configured')
 
+    def test_session_children_are_normalized_as_safe_report_rows(self):
+        report=EngineClient()._normalize('session_children',[{'id':'child-1','model':'small','content':'private prompt'}],'fixture-v1',self.filters,{})
+        self.assertEqual(report.payload['children'][0]['id'],'child-1')
+        self.assertNotIn('private prompt',str(report))
+
     def test_unknown_report_rejected_before_transport(self):
         called = []
         client = EngineClient('https://engine.example', allowed_hosts=('engine.example',), transport=lambda *a: called.append(a))
