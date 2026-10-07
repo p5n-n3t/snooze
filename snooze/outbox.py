@@ -35,6 +35,8 @@ class Outbox:
         with self.repo.connection(True) as c:
             c.execute('CREATE TABLE IF NOT EXISTS outbox(id TEXT PRIMARY KEY, incident TEXT, channel TEXT, project TEXT, payload TEXT, state TEXT, due_at REAL, attempts INTEGER DEFAULT 0, accepted_at REAL, acknowledged_at REAL, error_kind TEXT, resolved INTEGER DEFAULT 0, UNIQUE(incident,channel))')
             c.execute('CREATE TABLE IF NOT EXISTS coordinators(id TEXT PRIMARY KEY, projects TEXT NOT NULL)')
+            if 'sending_at' not in {r['name'] for r in c.execute('PRAGMA table_info(outbox)')}:
+                c.execute('ALTER TABLE outbox ADD COLUMN sending_at REAL')
 
     def enqueue(self,incident_id,channel_id,payload,due_at):
         payload=safe_payload(payload)
@@ -53,12 +55,16 @@ class Outbox:
 
     def deliver_due(self,now):
         receipts=[]
-        with self.repo.connection() as c:ids=[r['id'] for r in c.execute('SELECT id FROM outbox WHERE state="queued" AND due_at<=? ORDER BY due_at LIMIT 20',(now,))]
+        # A crashed send may have reached its receiver. Retry the SAME delivery ID,
+        # with a persisted bound; receivers must deduplicate that ID (at-least-once).
+        with self.repo.connection(True) as c:
+            c.execute('UPDATE outbox SET state=CASE WHEN attempts>=3 THEN "failed" ELSE "queued" END,error_kind="InterruptedDelivery",due_at=? WHERE state="sending" AND COALESCE(sending_at,due_at)<=?',(now,now-30))
+            ids=[r['id'] for r in c.execute('SELECT id FROM outbox WHERE state="queued" AND resolved=0 AND due_at<=? ORDER BY due_at LIMIT 20',(now,))]
         for id in ids:
             with self.repo.connection(True) as c:
-                row=c.execute('SELECT * FROM outbox WHERE id=? AND state="queued" AND due_at<=?',(id,now)).fetchone()
+                row=c.execute('SELECT * FROM outbox WHERE id=? AND state="queued" AND resolved=0 AND due_at<=?',(id,now)).fetchone()
                 if not row:continue
-                c.execute('UPDATE outbox SET state="sending",attempts=attempts+1 WHERE id=?',(id,))
+                c.execute('UPDATE outbox SET state="sending",attempts=attempts+1,sending_at=? WHERE id=?',(now,id))
             try:
                 response=self.deliver(row['channel'],{**json.loads(row['payload']),'delivery_id':id})
                 state=response.get('state','inbox')
@@ -68,7 +74,7 @@ class Outbox:
                 error=type(exc).__name__;accepted=None
                 state='failed' if row['attempts']>=2 else 'queued'
             with self.repo.connection(True) as c:
-                c.execute('UPDATE outbox SET state=?,accepted_at=?,error_kind=?,due_at=? WHERE id=?',(state,accepted,error,now+60*(2**row['attempts']),id))
+                c.execute('UPDATE outbox SET state=?,accepted_at=?,error_kind=?,due_at=? WHERE id=? AND state="sending" AND acknowledged_at IS NULL',(state,accepted,error,now+60*(2**row['attempts']),id))
                 self.repo.event(c,row['project'],'delivery_'+state,{'state':state,'error_kind':error},now=now)
             receipts.append(DeliveryReceipt(id,state,accepted,None,error))
         return receipts
@@ -82,7 +88,7 @@ class Outbox:
             coordinator=c.execute('SELECT projects FROM coordinators WHERE id=?',(coordinator_id,)).fetchone()
             row=c.execute('SELECT project FROM outbox WHERE id=?',(delivery_id,)).fetchone()
             if not row or not coordinator or row['project'] not in json.loads(coordinator['projects']):return False
-            c.execute('UPDATE outbox SET state="acknowledged",acknowledged_at=unixepoch() WHERE id=?',(delivery_id,))
+            c.execute('UPDATE outbox SET state="acknowledged",acknowledged_at=COALESCE(acknowledged_at,unixepoch()) WHERE id=?',(delivery_id,))
             self.repo.event(c,row['project'],'coordinator_acknowledged',{'actor':coordinator_id})
             return True
 

@@ -15,7 +15,7 @@ def extend_dashboard(state, control, project):
     managed = ownership is not None and ownership['executor'] == 'snooze'
     state['project']['executor'] = ownership['executor'] if ownership else 'external-managed'
     state['settings'] = settings
-    accounts = control.registry.list_public()
+    accounts = control.registry.list_public(project)
     state['accounts'] = accounts or state['accounts']
     state['capabilities'].update({
         name: {'supported': managed, 'reason': None if managed else 'This project is externally managed. Snooze cannot control its dispatcher.'}
@@ -40,9 +40,10 @@ def extend_dashboard(state, control, project):
     state['summary']['active_tasks']=len(state['slots'])
     state['summary']['queue_tasks']=len(control.repo.list(project))
     with control.repo.connection() as c:
-        row=c.execute('SELECT at,data FROM events WHERE project=? AND kind="cycle_finished" ORDER BY id DESC LIMIT 1',(project,)).fetchone()
-        start=c.execute('SELECT at FROM events WHERE project=? AND kind="cycle_started" ORDER BY id DESC LIMIT 1',(project,)).fetchone()
-    state['cycle']={'started_at':start['at'] if start else None,'finished_at':row['at'] if row else None,'checked':None,'next_due_at':row['at']+settings['interval'] if row else None}
+        row=c.execute('SELECT at,data FROM events WHERE project=? AND kind="monitor_finished" ORDER BY id DESC LIMIT 1',(project,)).fetchone()
+        start=c.execute('SELECT at FROM events WHERE project=? AND kind="monitor_started" ORDER BY id DESC LIMIT 1',(project,)).fetchone()
+    data=json.loads(row['data']) if row else {}
+    state['cycle']={'started_at':start['at'] if start else None,'finished_at':row['at'] if row else None,'checked':data.get('checked'),'next_due_at':row['at']+settings['interval'] if row else None}
     return state
 
 

@@ -1,6 +1,7 @@
 import json
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import unittest
 import urllib.error
 import urllib.request
@@ -46,6 +47,37 @@ class ControlTests(unittest.TestCase):
     def test_cross_origin_and_secrets_are_rejected(self):
         self.assertEqual(self.post('policy-config',{'interval':60},origin='https://evil.test')[0],403)
         self.assertEqual(self.post('account-config',{'http_headers':{'Authorization':'secret'}},target='a')[0],400)
+
+    def test_provider_connection_failure_is_a_receipt_not_an_http_disconnect(self):
+        self.registry.upsert_public_config('a',{},project_id='p')
+        def fail(id):raise RuntimeError('Private provider error')
+        self.registry.test_connection=fail
+        code,body=self.post('account-test',{},revision=1,target='a')
+        self.assertEqual(code,503);self.assertEqual(body['state'],'rejected')
+        self.assertNotIn('Private provider error',str(body))
+
+    def test_concurrent_cancel_with_one_revision_sends_one_provider_mutation(self):
+        self.registry.upsert_public_config('a',{},project_id='p')
+        self.repo.set_executor('p','snooze',quiesced=True,reconciled=True)
+        self.repo.add(TaskSpec('t','p',('record:1',),'ref','h',{}, {},'json-records',True))
+        receipt=self.repo.reserve('t','a',('record:1',),100)
+        self.repo.update_attempt(receipt.attempt_id,'running',session='s',now=100)
+        calls=[]
+        class Adapter:
+            def capabilities(self):return {'cancel':{'supported':True}}
+            def cancel(self,session):calls.append(session)
+        self.registry.overrides['a']=Adapter()
+        revision=self.repo.get('t')['revision']
+        barrier=threading.Barrier(2);original=self.repo.get
+        def get(id):
+            row=original(id)
+            if id=='t' and row['revision']==revision:barrier.wait(timeout=3)
+            return row
+        self.repo.get=get
+        with ThreadPoolExecutor(2) as pool:
+            results=list(pool.map(lambda _:self.control.apply('p','operator','cancel','t',{},revision),range(2)))
+        self.assertEqual(calls,['s'])
+        self.assertEqual(sorted(r.status_code for r in results),[202,409])
 
     def test_external_owner_cannot_pretend_to_pause_dispatcher(self):
         code,body=self.post('dispatch-pause',{'paused':True})

@@ -13,8 +13,15 @@ class MCPFacade:
 
     def call(self,tool,arguments,token):
         if not isinstance(token,str) or not hmac.compare_digest(token,self.token):raise PermissionError('Authentication required')
+        if not isinstance(arguments,dict):raise ValueError('Object arguments required')
         project=arguments.get('project')
         if project not in self.projects:raise PermissionError('Project is outside registered scope')
+        if tool=='snapshot':
+            from snooze.control_views import task_row
+            result={'project':self.repo.project(project),'tasks':[task_row(t) for t in self.repo.list(project)[:100]]}
+            if self.control:
+                result.update(settings=self.control.scheduler.settings(project),accounts=self.control.registry.list_public(project))
+            return result
         if tool=='events':return EventFeed(self.repo).read(project,arguments.get('after',0),arguments.get('limit',100))
         if tool=='incidents':return {'deliveries':self.outbox.list(project),'mode':'inbox-only'}
         if tool=='tasks':
@@ -31,14 +38,26 @@ class MCPFacade:
         raise ValueError('Unknown/unsupported Snooze tool')
 
     def rpc(self,message):
+        if not isinstance(message,dict):return {'jsonrpc':'2.0','id':None,'error':{'code':-32600,'message':'Object request required'}}
         id=message.get('id');method=message.get('method')
         if method=='notifications/initialized':return None
         try:
             if method=='initialize':result={'protocolVersion':'2025-03-26','capabilities':{'tools':{}},'serverInfo':{'name':'snooze','version':'0.2.0'}}
             elif method=='tools/list':
-                result={'tools':[{'name':'snooze_'+name,'description':'Scoped Snooze '+name,'inputSchema':{'type':'object','properties':{'project':{'type':'string'}},'required':['project'],'additionalProperties':True}} for name in ('events','incidents','tasks','task','control','register','acknowledge')]}
+                fields={
+                    'snapshot':{},'events':{'after':{'type':'integer','minimum':0},'limit':{'type':'integer','minimum':1,'maximum':200}},
+                    'incidents':{},'tasks':{},'task':{'task_id':{'type':'string'}},
+                    'control':{'action':{'type':'string','enum':['task-add','hold','approve','prioritize','resume','retry','cancel','reassign','account-config','account-test','policy-config','dispatch-pause','emergency-stop','coordinator-register','incident-ack']},'target_id':{'type':'string'},'values':{'type':'object'},'expected_revision':{'type':'integer','minimum':0}},
+                    'register':{'coordinator_id':{'type':'string'}},'acknowledge':{'coordinator_id':{'type':'string'},'delivery_id':{'type':'string'}}}
+                optional={'events':{'after','limit'},'control':{'values'}}
+                result={'tools':[{'name':'snooze_'+name,'description':'Scoped Snooze '+name+'; delivery acceptance is not acknowledgment or resolution.',
+                    'inputSchema':{'type':'object','properties':{'project':{'type':'string'},**properties},'required':['project',*[k for k in properties if k not in optional.get(name,set())]],'additionalProperties':False}}
+                    for name,properties in fields.items()]}
             elif method=='tools/call':
-                params=message['params'];name=params['name']
+                params=message['params']
+                if not isinstance(params,dict):raise ValueError('Object parameters required')
+                name=params['name']
+                if not isinstance(name,str):raise ValueError('Tool name required')
                 if not name.startswith('snooze_'):raise ValueError('Unknown tool')
                 value=self.call(name[7:],params.get('arguments',{}),self.token)
                 result={'content':[{'type':'text','text':json.dumps(value)}]}
