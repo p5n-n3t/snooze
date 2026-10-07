@@ -51,7 +51,7 @@ def safe_link(value):
     return value if parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password else None
 
 
-def _make_server(store, project, monitor, token, port=8765, project_config=None, static_root=None, control=None):
+def _make_server(store, project, monitor, token, port=8765, project_config=None, static_root=None, control=None, history=None):
     static = Path(static_root) if static_root is not None else Path(__file__).parent / 'static'
     static = static.resolve()
     config = project_config if isinstance(project_config, dict) else {}
@@ -95,6 +95,18 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
                     query=parse_qs(urlparse(self.path).query)
                     return self.send(store.history_page(project,offset=int(query.get('offset',['0'])[0]),limit=int(query.get('limit',['25'])[0]),query=query.get('q',[''])[0]))
                 except ValueError:return self.send({'error':'Invalid history page'},400)
+            if path in ('/api/v2/history/report','/api/v2/history/engine','/api/v2/history/export'):
+                if not authorized_read(self.headers,host,token):return self.send({'error':'Private read authentication required'},403)
+                if history is None:return self.send({'error':'History service is not configured'},409)
+                try:
+                    query=parse_qs(urlparse(self.path).query,keep_blank_values=True,max_num_fields=70)
+                    if path.endswith('/report'):return self.send(history.report(query))
+                    if path.endswith('/engine'):return self.send(history.engine_report(query))
+                    mime,data=history.export(query)
+                    self.send_response(200);self.send_header('Content-Type',mime)
+                    self.send_header('Content-Disposition','attachment; filename="snooze-history.'+('csv' if mime.startswith('text/csv') else 'json')+'"')
+                    self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.end_headers();self.wfile.write(data);return
+                except (ValueError,TypeError,OverflowError):return self.send({'error':'Invalid or unsupported history filter'},400)
             if path in ('/api/v2/providers', '/api/v2/queue', '/api/v2/events','/api/v2/inbox'):
                 if not authorized_read(self.headers, host, token):
                     return self.send({'error': 'Private read authentication required'}, 403)
@@ -113,8 +125,7 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
                         from snooze.control_views import task_row
                         offset = int(query.get('offset', ['0'])[0]); limit = int(query.get('limit', ['50'])[0])
                         if not 0 <= offset or not 1 <= limit <= 200: raise ValueError('Invalid page')
-                        rows = control.repo.list(project)
-                        return self.send({'tasks': [task_row(row) for row in rows[offset:offset+limit]], 'total': len(rows), 'offset': offset})
+                        return self.send(control.repo.queue_page(project,offset=offset,limit=limit))
                     from snooze.events import EventFeed
                     return self.send(EventFeed(control.repo).read(project, int(query.get('after', ['0'])[0]), int(query.get('limit', ['100'])[0])))
                 except ValueError:
@@ -197,6 +208,6 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
     return ThreadingHTTPServer(('127.0.0.1', port), Handler)
 
 
-def serve(store, project, monitor, token, port=8765, project_config=None, control=None):
-    server = _make_server(store, project, monitor, token, port, project_config, control=control)
+def serve(store, project, monitor, token, port=8765, project_config=None, control=None, history=None):
+    server = _make_server(store, project, monitor, token, port, project_config, control=control,history=history)
     server.serve_forever()

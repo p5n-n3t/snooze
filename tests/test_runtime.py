@@ -42,6 +42,12 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.interval(), 30)
         self.assertTrue(runtime.scheduler.wake.is_set())
 
+    def test_invalid_optional_engine_cannot_stop_monitoring(self):
+        self.config['analytics_engine']={'base_url':'https://unapproved.test','allowed_hosts':['other.test'],'project_mapping':'p'}
+        runtime=Runtime(self.state,self.config,observe=lambda job:{})
+        self.assertEqual(runtime.history.engine_report({})['error_kind'],'configuration_invalid')
+        self.assertEqual(runtime.check(runtime.project)['checked'],0)
+
     def test_collector_failure_is_deduplicated_and_verified_completion_resolves_it(self):
         runtime = Runtime(self.state, self.config, observe=lambda job: {})
         runtime.repo.add(TaskSpec('t',runtime.project,('record:1',),'ref','hash',{}, {},'json-records',True))

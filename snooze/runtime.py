@@ -19,7 +19,7 @@ from snooze.transport import LightSprint
 from snooze.validation import ValidatorRegistry
 
 
-ALERT_STATES = {'idle','failed','unavailable','ownership_unknown','unknown','verification_unavailable'}
+ALERT_STATES = {'idle','failed','unavailable','ownership_unknown','unknown','verification_unavailable','stalled'}
 
 
 class Runtime:
@@ -33,6 +33,16 @@ class Runtime:
         from snooze.artifacts import GitHubArtifacts
         credentials = CredentialStore(self.state / 'credentials.json')
         self.registry = ProviderRegistry(self.repo, self.transport, GitHubArtifacts(credentials),project_id=self.project)
+        from snooze.history_api import HistoryAPI
+        from snooze.analytics_engine import EngineClient
+        engine_config=config.get('analytics_engine',{})
+        engine=None;engine_error=None
+        if engine_config.get('base_url'):
+            try:
+                engine=EngineClient(engine_config['base_url'],allowed_hosts=engine_config.get('allowed_hosts',()),
+                                    bearer_token=credentials.get(engine_config['credential_ref']) if engine_config.get('credential_ref') else None)
+            except (ValueError,KeyError,OSError,TypeError):engine_error='configuration_invalid'
+        self.history=HistoryAPI(self.repo,self.project,engine=engine,engine_project=engine_config.get('project_mapping'),engine_error=engine_error)
         self.scheduler = Scheduler(self.repo, self.registry, ValidatorRegistry())
         self.control = Control(self.repo, self.registry, self.scheduler)
         self.monitor = Monitor(self.store, observe or self.observe_legacy)
@@ -84,6 +94,7 @@ class Runtime:
             observation=json.loads(observed['data']) if observed else {}
             if attempt['state'] in ('blocked','ambiguous'):
                 observation={'status':'failed' if attempt['state']=='blocked' else 'ownership_unknown'}
+            elif attempt['data'].get('incident_kind')=='stalled':observation={'status':'stalled'}
             elif attempt['task'] in errors:
                 observation={'status':'verification_unavailable'}
             workers.append({'id':'attempt:'+attempt['id'],'session_id':attempt['session'],'server_key':attempt['account'],
@@ -119,6 +130,8 @@ class Runtime:
         if not self.lock.acquire(False): raise RuntimeError('Check already running')
         started = time.time()
         try:
+            settings=self.scheduler.settings(project)
+            self.monitor.max_workers=settings['observation_workers'];self.transport.timeout=settings['request_timeout']
             self.import_queue()
             with self.repo.connection(True) as c: self.repo.event(c,project,'monitor_started',{},now=started)
             result = self.monitor.check(project)

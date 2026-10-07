@@ -34,6 +34,17 @@ class TaskTests(unittest.TestCase):
         for t in threads: t.join()
         self.assertCountEqual(outcomes, ['reserved', 'conflict'])
 
+    def test_public_queue_page_selects_only_summary_and_exact_total(self):
+        for index in range(30):
+            self.task(str(index),('record:'+str(index),))
+        self.repo.register_project('q','/q')
+        self.repo.add(TaskSpec('foreign','q',('record:x',),'ref','hash',{}, {},'json-records'))
+        page=self.repo.queue_page('p',offset=10,limit=5)
+        self.assertEqual(page['total'],30);self.assertEqual(len(page['tasks']),5)
+        self.assertNotIn('spec',repr(page))
+        self.assertNotIn('instructions',repr(page))
+        self.assertTrue(page['has_more'])
+
     def test_directory_scope_conflicts_with_child(self):
         self.task('a', ('path:src/',)); self.task('b', ('path:src/app.py',))
         self.repo.reserve('a', 'account', ('path:src/',), 100)
@@ -54,6 +65,16 @@ class TaskTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.repo.reserve('a', 'other', ('record:1',), 10000)
         self.assertTrue(self.repo.release(receipt.attempt_id, {'confirmed_inactive': True}))
+
+    def test_handover_requires_attestation_and_no_unreconciled_scope(self):
+        with self.assertRaises(ValueError):self.repo.set_executor('p','snooze')
+        self.task('owned')
+        attempt=self.repo.reserve('owned','account',('record:1',),100)
+        with self.assertRaises(ValueError):self.repo.set_executor('p','snooze',quiesced=True,reconciled=True)
+        self.assertEqual(self.repo.project('p')['executor'],'external-managed')
+        self.repo.release(attempt.attempt_id,{'confirmed_inactive':True})
+        self.repo.set_executor('p','snooze',quiesced=True,reconciled=True)
+        self.assertEqual(self.repo.project('p')['executor'],'snooze')
 
     def test_unapproved_task_and_changed_scope_rejected(self):
         self.task('a', approved=False)

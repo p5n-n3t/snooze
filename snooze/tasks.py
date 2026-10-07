@@ -80,6 +80,10 @@ class TaskRepository:
         if executor not in ('external-managed', 'shadow', 'snooze'): raise ValueError('Invalid executor')
         if executor == 'snooze' and not (quiesced and reconciled): raise ValueError('Handover requires quiescence and reconciled sessions')
         with self.connection(True) as c:
+            current=c.execute('SELECT executor FROM projects WHERE id=?',(project,)).fetchone()
+            if current is None:raise ValueError('Unknown project')
+            if executor=='snooze' and current['executor']!='snooze' and c.execute('SELECT 1 FROM attempts WHERE project=? AND released_at IS NULL',(project,)).fetchone():
+                raise ValueError('Unreconciled attempts still own scopes; handover rejected')
             c.execute('UPDATE projects SET executor=? WHERE id=?', (executor, project))
             self.event(c, project, 'executor_changed', {'executor': executor})
 
@@ -105,6 +109,13 @@ class TaskRepository:
     def list(self, project):
         with self.connection() as c:
             return [self.decode(r) for r in c.execute('SELECT * FROM tasks WHERE project=? ORDER BY priority DESC,created_at,id', (project,))]
+
+    def queue_page(self,project,*,offset=0,limit=50):
+        if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=200:raise ValueError('Invalid queue page')
+        with self.connection() as c:
+            total=c.execute('SELECT COUNT(*) FROM tasks WHERE project=?',(project,)).fetchone()[0]
+            rows=c.execute('SELECT id,project,state,priority,created_at,updated_at,revision,substr(instructions,1,160) AS summary,json_extract(spec,"$.approved") AS approved FROM tasks WHERE project=? ORDER BY priority DESC,created_at,id LIMIT ? OFFSET ?',(project,limit,offset)).fetchall()
+        return {'tasks':[{**dict(r),'approved':bool(r['approved'])} for r in rows],'total':total,'offset':offset,'has_more':offset+len(rows)<total}
 
     def spec(self, id):
         task = self.get(id)
