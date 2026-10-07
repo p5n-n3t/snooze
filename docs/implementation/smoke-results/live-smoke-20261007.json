@@ -1,0 +1,11 @@
+{
+  "task_id": "live-smoke-20261007",
+  "attempt_id": "5e13f7bb80dd42e78f0a0d55f2fee244",
+  "generation": 1,
+  "records": [
+    {
+      "id": "smoke-1",
+      "result": 4
+    }
+  ]
+}
