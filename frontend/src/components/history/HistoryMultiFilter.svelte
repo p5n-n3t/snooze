@@ -1,8 +1,11 @@
 <script lang="ts">
+  import { HISTORY_FILTER_VALUE_LIMIT } from "../../lib/history-types";
+
   interface Props { label: string; values: string[]; options: string[]; onchange: (values: string[]) => void }
   let { label, values, options, onchange }: Props = $props();
 
   function toggle(value: string, checked: boolean) {
+    if (checked && values.length >= HISTORY_FILTER_VALUE_LIMIT && !values.includes(value)) return;
     const next = checked ? [...values, value] : values.filter((item) => item !== value);
     onchange([...new Set(next)]);
   }
@@ -16,9 +19,12 @@
     <legend>{label}</legend>
     {#if options.length}
       {#each options as option (option)}
-        <label><input type="checkbox" checked={values.includes(option)} onchange={(event) => toggle(option, event.currentTarget.checked)} /><span>{option}</span></label>
+        <label><input type="checkbox" checked={values.includes(option)} disabled={!values.includes(option) && values.length >= HISTORY_FILTER_VALUE_LIMIT} onchange={(event) => toggle(option, event.currentTarget.checked)} /><span>{option}</span></label>
       {/each}
     {:else}<p>No recorded values to filter.</p>{/if}
+    {#if values.length >= HISTORY_FILTER_VALUE_LIMIT && options.some((option) => !values.includes(option))}
+      <p role="status">Choose up to {HISTORY_FILTER_VALUE_LIMIT} values. Clear a selection to choose another.</p>
+    {/if}
     {#if values.length}<button type="button" class="clear-filter" onclick={() => onchange([])}>Clear selection</button>{/if}
   </fieldset>
 </details>

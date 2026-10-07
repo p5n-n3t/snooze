@@ -4,12 +4,14 @@ import type {
   HistoryFilters,
   HistoryReportResponse,
 } from "./history-types";
+import { assertHistoryFilterCardinality } from "./history-types";
 
 type Fetcher = typeof fetch;
 
 const HISTORY_BASE = "/api/v2/history";
 
 export function historyQuery(filters: HistoryFilters): URLSearchParams {
+  assertHistoryFilterCardinality(filters);
   const query = new URLSearchParams();
   query.set("from_utc", filters.fromUtc);
   query.set("to_utc", filters.toUtc);

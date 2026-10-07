@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import Button from "../../lib/kit/components/Button.svelte";
   import { getHistoryReport, historyExportUrl, historyQuery } from "../../lib/history-api";
-  import type { HistoryFilters, HistoryReportResponse } from "../../lib/history-types";
+  import type { HistoryFilters, HistoryReportResponse, NativeHistoryReport } from "../../lib/history-types";
   import { defaultHistoryFilters, historyShareUrl, loadHistoryFilters, persistHistoryFilters, validateHistoryFilters } from "./history-state";
   import HistoryBreakdowns from "./HistoryBreakdowns.svelte";
   import HistoryCalendarHeatmap from "./HistoryCalendarHeatmap.svelte";
@@ -17,6 +17,9 @@
   import HistoryTrend from "./HistoryTrend.svelte";
 
   interface Props { oninspect?: (taskId: string) => void }
+  type FacetOptions = { accounts: string[]; models: string[]; efforts: string[] };
+  interface FacetDomain extends FacetOptions { contextKey: string; projectId: string | null; complete: boolean }
+  const EMPTY_FACETS: FacetOptions = { accounts: [], models: [], efforts: [] };
   let { oninspect = () => undefined }: Props = $props();
 
   let filters = $state<HistoryFilters>(defaultHistoryFilters());
@@ -27,9 +30,95 @@
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let requestNumber = 0;
   let appliedFilterKey = "";
+  let appliedContextKey = "";
+  let facetDomain = $state<FacetDomain | null>(null);
+  let facetRequest: { requestNumber: number; contextKey: string; projectId: string | null; controller: AbortController } | null = null;
+  let facetRequestNumber = 0;
   const filterKey = $derived(historyQuery(filters).toString());
+  const currentFacetContext = $derived(facetContextKey(filters));
   const validRange = $derived(validateHistoryFilters(filters));
   const stale = $derived(Boolean(response && appliedFilterKey !== filterKey));
+
+  function facetContextKey(value: HistoryFilters): string {
+    return JSON.stringify([value.fromUtc, value.toUtc, value.timezone]);
+  }
+
+  function hasFacetSelections(value: HistoryFilters): boolean {
+    return value.accounts.length > 0 || value.models.length > 0 || value.efforts.length > 0;
+  }
+
+  function facetOptionsFromReport(report: NativeHistoryReport): FacetOptions {
+    return {
+      accounts: report.breakdowns.accounts.map((row) => row.id).filter((value): value is string => Boolean(value)),
+      models: [...report.breakdowns.models, ...report.breakdowns.requested_models, ...report.breakdowns.confirmed_models]
+        .map((row) => row.id).filter((value): value is string => Boolean(value)),
+      efforts: report.breakdowns.efforts.map((row) => row.id),
+    };
+  }
+
+  function mergeFacetOptions(...sources: FacetOptions[]): FacetOptions {
+    const values = (key: keyof FacetOptions) => [...new Set(sources.flatMap((source) => source[key]))].sort();
+    return { accounts: values("accounts"), models: values("models"), efforts: values("efforts") };
+  }
+
+  function resetFacetDomain(): void {
+    facetRequestNumber += 1;
+    facetRequest?.controller.abort();
+    facetRequest = null;
+    facetDomain = null;
+  }
+
+  async function loadUnfilteredFacetDomain(requestFilters: HistoryFilters, projectId: string | null): Promise<void> {
+    const contextKey = facetContextKey(requestFilters);
+    if (facetRequest?.contextKey === contextKey && facetRequest.projectId === projectId) return;
+    facetRequest?.controller.abort();
+    const currentRequest = ++facetRequestNumber;
+    const controller = new AbortController();
+    facetRequest = { requestNumber: currentRequest, contextKey, projectId, controller };
+    const unfiltered: HistoryFilters = { ...requestFilters, accounts: [], models: [], efforts: [] };
+    try {
+      // The report endpoint applies the same 10,000-row bound to this same-project/date/timezone query.
+      const result = await getHistoryReport(unfiltered, controller.signal);
+      if (currentRequest !== facetRequestNumber || contextKey !== facetContextKey(filters) || result.filters.project_id !== projectId) return;
+      facetDomain = {
+        ...facetOptionsFromReport(result.native),
+        contextKey,
+        projectId,
+        complete: !result.native.coverage.truncated,
+      };
+    } catch (error) {
+      if (currentRequest !== facetRequestNumber || (error instanceof DOMException && error.name === "AbortError")) return;
+      // Keep only the visible filtered choices and warn that the unfiltered domain could not be established.
+    } finally {
+      if (facetRequest?.requestNumber === currentRequest) facetRequest = null;
+    }
+  }
+
+  function updateFacetDomain(result: HistoryReportResponse, requestFilters: HistoryFilters): void {
+    const contextKey = facetContextKey(requestFilters);
+    const current = facetDomain;
+    const matches = current?.contextKey === contextKey && current.projectId === result.filters.project_id;
+    const reportOptions = facetOptionsFromReport(result.native);
+    if (!matches) facetDomain = null;
+
+    if (!hasFacetSelections(requestFilters)) {
+      if (facetRequest) {
+        facetRequestNumber += 1;
+        facetRequest.controller.abort();
+        facetRequest = null;
+      }
+      facetDomain = {
+        ...reportOptions,
+        contextKey,
+        projectId: result.filters.project_id,
+        complete: !result.native.coverage.truncated,
+      };
+    } else if (matches && current) {
+      facetDomain = { ...current, ...mergeFacetOptions(current, reportOptions) };
+    } else {
+      void loadUnfilteredFacetDomain(requestFilters, result.filters.project_id);
+    }
+  }
 
   function browserStorage(): Pick<Storage, "getItem" | "setItem"> | null {
     try { return typeof window === "undefined" ? null : window.localStorage; }
@@ -37,14 +126,14 @@
   }
 
   const options = $derived.by(() => {
-    const report = response?.native;
-    if (!report) return { accounts: [], models: [], efforts: [] };
-    return {
-      accounts: report.breakdowns.accounts.map((row) => row.id).filter((value): value is string => Boolean(value)).sort(),
-      models: [...new Set([...report.breakdowns.models, ...report.breakdowns.requested_models, ...report.breakdowns.confirmed_models].map((row) => row.id).filter((value): value is string => Boolean(value)))].sort(),
-      efforts: report.breakdowns.efforts.map((row) => row.id).sort(),
-    };
+    const useDomain = facetDomain?.contextKey === currentFacetContext && (!response || facetDomain.projectId === response.filters.project_id);
+    const useReport = Boolean(response && appliedContextKey === currentFacetContext);
+    const source = useDomain ? facetDomain! : useReport ? facetOptionsFromReport(response!.native) : EMPTY_FACETS;
+    return mergeFacetOptions(source, filters);
   });
+  const facetChoicesComplete = $derived(Boolean(
+    facetDomain?.contextKey === currentFacetContext && response && facetDomain.projectId === response.filters.project_id && facetDomain.complete,
+  ));
 
   function cancelReport(): void {
     requestNumber += 1;
@@ -61,14 +150,17 @@
     const current = ++requestNumber;
     const controller = new AbortController();
     activeController = controller;
-    const requestedKey = filterKey;
+    const requestedFilters: HistoryFilters = { ...filters, accounts: [...filters.accounts], models: [...filters.models], efforts: [...filters.efforts] };
+    const requestedKey = historyQuery(requestedFilters).toString();
     busy = true;
     message = "";
     try {
-      const result = await getHistoryReport(filters, controller.signal);
+      const result = await getHistoryReport(requestedFilters, controller.signal);
       if (current !== requestNumber) return;
       response = result;
       appliedFilterKey = requestedKey;
+      appliedContextKey = facetContextKey(requestedFilters);
+      updateFacetDomain(result, requestedFilters);
     } catch (error) {
       if (current !== requestNumber || (error instanceof DOMException && error.name === "AbortError")) return;
       message = error instanceof Error ? error.message : "History could not be loaded.";
@@ -80,6 +172,7 @@
   function changeFilters(next: HistoryFilters): void {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = null;
+    if (facetContextKey(filters) !== facetContextKey(next)) resetFacetDomain();
     filters = next;
     persistHistoryFilters(next, browserStorage());
     if (typeof window !== "undefined") window.history.replaceState(null, "", historyShareUrl(next, window.location.href));
@@ -97,7 +190,7 @@
     persistHistoryFilters(filters, storage);
     window.history.replaceState(null, "", historyShareUrl(filters, window.location.href));
     void refresh();
-    return () => { if (debounceTimer) clearTimeout(debounceTimer); cancelReport(); };
+    return () => { if (debounceTimer) clearTimeout(debounceTimer); cancelReport(); resetFacetDomain(); };
   });
 </script>
 
@@ -107,7 +200,7 @@
     <div class="heading-side"><span class="scope-label">CURRENT PROJECT</span><strong>{response?.filters.project_id ?? "Resolving project scope"}</strong><div class="heading-actions"><a href={historyExportUrl("csv", filters)} class="export-link">Export CSV</a><a href={historyExportUrl("json", filters)} class="export-link">Export JSON</a></div></div>
   </div>
 
-  <HistoryFilterBar filters={filters} {options} refreshing={busy} error={message} onChange={changeFilters} onRefresh={() => void refresh()} />
+  <HistoryFilterBar filters={filters} {options} optionsComplete={facetChoicesComplete} refreshing={busy} error={message} onChange={changeFilters} onRefresh={() => void refresh()} />
   {#if stale}<p class="stale-banner" role="status">Filters changed. The previous report remains visible while this bounded request updates.</p>{/if}
   {#if response?.native.coverage.truncated}<p class="truncation-banner" role="status"><strong>Bounded report:</strong> one or more source sections reached the 10,000-row limit. Coverage and metric states below retain that limitation.</p>{/if}
 

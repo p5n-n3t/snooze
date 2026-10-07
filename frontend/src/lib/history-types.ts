@@ -159,6 +159,16 @@ export interface HistoryFilters {
   efforts: string[];
 }
 
+export const HISTORY_FILTER_VALUE_LIMIT = 20;
+
+export function assertHistoryFilterCardinality(filters: HistoryFilters): void {
+  for (const key of ["accounts", "models", "efforts"] as const) {
+    if (filters[key].length > HISTORY_FILTER_VALUE_LIMIT) {
+      throw new RangeError(`History ${key} filters may contain no more than ${HISTORY_FILTER_VALUE_LIMIT} values.`);
+    }
+  }
+}
+
 export type EngineReportKind =
   | "usage_summary"
   | "usage_top_sessions"
