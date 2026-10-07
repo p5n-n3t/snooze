@@ -5,10 +5,11 @@ import mimetypes
 import re
 import threading
 import time
+from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie, CookieError
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, parse_qs
 
 from snooze.views import dashboard_state, task_detail
 
@@ -50,7 +51,7 @@ def safe_link(value):
     return value if parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password else None
 
 
-def _make_server(store, project, monitor, token, port=8765, project_config=None, static_root=None):
+def _make_server(store, project, monitor, token, port=8765, project_config=None, static_root=None, control=None):
     static = Path(static_root) if static_root is not None else Path(__file__).parent / 'static'
     static = static.resolve()
     config = project_config if isinstance(project_config, dict) else {}
@@ -83,13 +84,41 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
             if path == '/api/v2/state':
                 if not authorized_read(self.headers, host, token):
                     return self.send({'error': 'Origin and control token required'}, 403)
-                return self.send(dashboard_state(store, project, config, time.time()))
+                state = dashboard_state(store, project, config, time.time())
+                if control is not None:
+                    from snooze.control_views import extend_dashboard
+                    state = extend_dashboard(state, control, project)
+                return self.send(state)
+            if path in ('/api/v2/providers', '/api/v2/queue', '/api/v2/events'):
+                if not authorized_read(self.headers, host, token):
+                    return self.send({'error': 'Private read authentication required'}, 403)
+                if control is None:
+                    return self.send({'error': 'Control plane is not configured'}, 409)
+                try:
+                    query = parse_qs(urlparse(self.path).query)
+                    if path == '/api/v2/providers':
+                        return self.send({'accounts': control.registry.list_public()})
+                    if path == '/api/v2/queue':
+                        from snooze.control_views import task_row
+                        offset = int(query.get('offset', ['0'])[0]); limit = int(query.get('limit', ['50'])[0])
+                        if not 0 <= offset or not 1 <= limit <= 200: raise ValueError('Invalid page')
+                        rows = control.repo.list(project)
+                        return self.send({'tasks': [task_row(row) for row in rows[offset:offset+limit]], 'total': len(rows), 'offset': offset})
+                    from snooze.events import EventFeed
+                    return self.send(EventFeed(control.repo).read(project, int(query.get('after', ['0'])[0]), int(query.get('limit', ['100'])[0])))
+                except ValueError:
+                    return self.send({'error': 'Invalid query'}, 400)
             task_match = re.fullmatch(r'/api/v2/tasks/([^/]+)', path)
             if task_match:
                 if not authorized_read(self.headers, host, token):
                     return self.send({'error': 'Origin and control token required'}, 403)
                 task_id = unquote(task_match.group(1))
-                detail = task_detail(store, project, task_id)
+                if control is not None:
+                    from snooze.control_views import managed_task_detail
+                    detail = managed_task_detail(control, project, task_id)
+                else:
+                    detail = None
+                if detail is None: detail = task_detail(store, project, task_id)
                 return self.send(detail if detail is not None else {'error': 'Not found'}, 200 if detail is not None else 404)
             if path == '/api/state':
                 if not authorized_read(self.headers, host, token):
@@ -113,7 +142,7 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
             self.send_response(200)
             content_type = mimetypes.guess_type(target.name)[0] or 'application/octet-stream'
             self.send_header('Content-Type', content_type)
-            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
             if path == '/':
                 self.send_header('Set-Cookie', f'snooze_control={token}; HttpOnly; SameSite=Strict; Path=/')
             self.end_headers()
@@ -129,6 +158,10 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
                 if not 0 < length <= 8192:
                     raise ValueError('Invalid body size')
                 body = json.loads(self.rfile.read(length))
+                if self.path == '/api/v2/control':
+                    if control is None: return self.send({'error': 'Control plane is not configured'}, 409)
+                    result = control.apply(project, 'local-operator', body['action'], body['target_id'], body.get('values', {}), body['expected_revision'])
+                    return self.send(asdict(result), result.status_code)
                 if self.path == '/api/settings':
                     store.set_settings(project, body)
                 elif self.path == '/api/check':
@@ -151,6 +184,6 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
     return ThreadingHTTPServer(('127.0.0.1', port), Handler)
 
 
-def serve(store, project, monitor, token, port=8765, project_config=None):
-    server = _make_server(store, project, monitor, token, port, project_config)
+def serve(store, project, monitor, token, port=8765, project_config=None, control=None):
+    server = _make_server(store, project, monitor, token, port, project_config, control=control)
     server.serve_forever()
