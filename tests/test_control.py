@@ -56,6 +56,13 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(code,503);self.assertEqual(body['state'],'rejected')
         self.assertNotIn('Private provider error',str(body))
 
+    def test_unimplemented_connection_test_is_not_confirmed(self):
+        self.registry.upsert_public_config('a',{'adapter':'ollama'},project_id='p')
+        code,body=self.post('account-test',{},revision=1,target='a')
+        self.assertEqual(code,409)
+        self.assertEqual(body['state'],'rejected')
+        self.assertIn('unsupported',body['reason'].lower())
+
     def test_concurrent_cancel_with_one_revision_sends_one_provider_mutation(self):
         self.registry.upsert_public_config('a',{},project_id='p')
         self.repo.set_executor('p','snooze',quiesced=True,reconciled=True)

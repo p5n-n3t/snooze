@@ -109,7 +109,9 @@ class ProviderRegistry:
 
     def test_connection(self, id):
         config = self.get(id)
-        if config['adapter'] != 'lightsprint' or self.transport is None: return self.snapshot(id)
+        if config['adapter'] != 'lightsprint' or self.transport is None:
+            from snooze.adapters.base import UnsupportedOperation
+            raise UnsupportedOperation('Connection test unsupported by this adapter')
         result = self.transport.request(config['mcp_key'], 'GET', '/api/repos')
         workspaces = {r.get('workspaceId') for r in result.get('repos',[]) if isinstance(r,dict)}
         if config.get('workspace_id') and config['workspace_id'] not in workspaces: raise ValueError('Configured workspace not accessible')

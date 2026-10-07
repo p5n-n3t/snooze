@@ -19,7 +19,7 @@ from snooze.transport import LightSprint
 from snooze.validation import ValidatorRegistry
 
 
-ALERT_STATES = {'idle','failed','unavailable','ownership_unknown','unknown'}
+ALERT_STATES = {'idle','failed','unavailable','ownership_unknown','unknown','verification_unavailable'}
 
 
 class Runtime:
@@ -74,21 +74,33 @@ class Runtime:
 
     def interval(self): return self.scheduler.settings(self.project)['interval']
 
-    def _bridge_incidents(self, now):
+    def _bridge_incidents(self, now, scheduler_errors=()):
         workers = self.store.snapshot(self.project)['workers']
-        for attempt in self.repo.active(self.project):
+        active=self.repo.active(self.project)
+        errors={error.get('task') for error in scheduler_errors}
+        for attempt in active:
             with self.repo.connection() as c:
                 observed=c.execute('SELECT at,data FROM events WHERE attempt=? AND kind="provider_observed" ORDER BY id DESC LIMIT 1',(attempt['id'],)).fetchone()
             observation=json.loads(observed['data']) if observed else {}
             if attempt['state'] in ('blocked','ambiguous'):
                 observation={'status':'failed' if attempt['state']=='blocked' else 'ownership_unknown'}
+            elif attempt['task'] in errors:
+                observation={'status':'verification_unavailable'}
             workers.append({'id':'attempt:'+attempt['id'],'session_id':attempt['session'],'server_key':attempt['account'],
                             'observation':observation,'observed_at':observed['at'] if observed else None,'task_id':attempt['task']})
+        # A released, verified terminal attempt is no longer an active row, but
+        # its existing incident must receive an honest resolution receipt.
+        with self.repo.connection() as c:
+            released=c.execute('SELECT a.* FROM attempts a JOIN incident_episodes e ON e.job="attempt:"||a.id AND e.project=a.project WHERE a.project=? AND a.released_at IS NOT NULL AND e.kind IS NOT NULL AND a.state IN ("complete","cancelled")',(self.project,)).fetchall()
+        for attempt in released:
+            workers.append({'id':'attempt:'+attempt['id'],'observation':{'status':attempt['state']}})
         for job in workers:
             kind = (job.get('observation') or {}).get('status')
             kind = kind if kind in ALERT_STATES else None
             with self.repo.connection(True) as c:
                 old = c.execute('SELECT * FROM incident_episodes WHERE project=? AND job=?',(self.project,job['id'])).fetchone()
+                if old and old['kind']=='verification_unavailable' and kind is None and job['id'].startswith('attempt:') and (job.get('observation') or {}).get('status') not in ('complete','cancelled'):
+                    continue  # absence of a new error is not validated output
                 if old and old['kind'] == kind: continue
                 if old and old['incident']:
                     c.execute('UPDATE outbox SET resolved=1 WHERE incident=?',(old['incident'],))
@@ -111,7 +123,7 @@ class Runtime:
             with self.repo.connection(True) as c: self.repo.event(c,project,'monitor_started',{},now=started)
             result = self.monitor.check(project)
             report = self.scheduler.tick(project)
-            self._bridge_incidents(time.time()); receipts = self.outbox.deliver_due(time.time())
+            self._bridge_incidents(time.time(),report.errors); receipts = self.outbox.deliver_due(time.time())
             finished = time.time()
             with self.repo.connection(True) as c:
                 self.repo.event(c,project,'monitor_finished',{'checked':result['checked'],'started_at':started,'finished_at':finished},now=finished)

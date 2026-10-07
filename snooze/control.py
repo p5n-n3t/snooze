@@ -2,6 +2,7 @@
 import json
 import time
 import uuid
+from snooze.adapters.base import UnsupportedOperation
 from dataclasses import dataclass
 
 
@@ -98,6 +99,8 @@ class Control:
                 self.repo.event(c,project_id,'control_'+action,{'actor':actor_id,'action':action},target_id,now=time.time())
             self.scheduler.wake.set(); revision+=1
             return receipt('confirmed')
+        except UnsupportedOperation as e:
+            return receipt('rejected',str(e),409)
         except (ValueError,TypeError,KeyError) as e:
             return receipt('rejected',str(e) if isinstance(e,ValueError) else 'Invalid value type',409 if str(e)=='Stale revision' else 400)
         except (TimeoutError,ConnectionError):
