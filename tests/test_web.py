@@ -47,10 +47,28 @@ class WebTests(unittest.TestCase):
                     'Origin': f'http://127.0.0.1:{port}', 'Cookie': 'snooze_control=secret'})
                 with urlopen(request) as response:
                     self.assertEqual(json.load(response)['schema_version'], 2)
+                request = Request(base + '/api/v2/state', headers={
+                    'Cookie': 'snooze_control=secret', 'Sec-Fetch-Site': 'same-origin'})
+                with urlopen(request) as response:
+                    self.assertEqual(json.load(response)['schema_version'], 2)
+                request = Request(base + '/api/v2/state', headers={
+                    'Origin': 'http://evil.test', 'Cookie': 'snooze_control=secret'})
+                with self.assertRaises(HTTPError) as error:
+                    urlopen(request)
+                self.assertEqual(error.exception.code, 403)
                 request = Request(base + '/api/v2/tasks/t1', headers={
                     'Origin': f'http://127.0.0.1:{port}', 'Cookie': 'snooze_control=secret'})
                 with urlopen(request) as response:
                     self.assertEqual(json.load(response)['instruction'], 'safe detail')
+                request = Request(base + '/api/v2/tasks/t1', headers={
+                    'Cookie': 'snooze_control=secret', 'Sec-Fetch-Site': 'same-origin'})
+                with urlopen(request) as response:
+                    self.assertEqual(json.load(response)['instruction'], 'safe detail')
+                request = Request(base + '/api/v2/tasks/t1', headers={
+                    'Origin': 'http://evil.test', 'Cookie': 'snooze_control=secret'})
+                with self.assertRaises(HTTPError) as error:
+                    urlopen(request)
+                self.assertEqual(error.exception.code, 403)
                 with urlopen(base + '/api/health') as response:
                     self.assertEqual(json.load(response), {'name': 'snooze', 'api_version': 2, 'project': 'demo'})
             finally:

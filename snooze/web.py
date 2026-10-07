@@ -81,12 +81,12 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
             if path == '/api/health':
                 return self.send({'name': 'snooze', 'api_version': 2, 'project': project})
             if path == '/api/v2/state':
-                if not authorized(self.headers, host, token):
+                if not authorized_read(self.headers, host, token):
                     return self.send({'error': 'Origin and control token required'}, 403)
                 return self.send(dashboard_state(store, project, config, time.time()))
             task_match = re.fullmatch(r'/api/v2/tasks/([^/]+)', path)
             if task_match:
-                if not authorized(self.headers, host, token):
+                if not authorized_read(self.headers, host, token):
                     return self.send({'error': 'Origin and control token required'}, 403)
                 task_id = unquote(task_match.group(1))
                 detail = task_detail(store, project, task_id)
