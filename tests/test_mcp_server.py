@@ -6,6 +6,15 @@ from snooze.mcp_server import MCPFacade
 
 
 class MCPTests(unittest.TestCase):
+    def test_tools_describe_required_control_and_acknowledgment_arguments(self):
+        with tempfile.TemporaryDirectory() as d:
+            facade=MCPFacade(TaskRepository(Path(d)/'s.sqlite'),None,'private',['p'])
+            tools={t['name']:t for t in facade.rpc({'id':1,'method':'tools/list'})['result']['tools']}
+            self.assertIn('task_id',tools['snooze_task']['inputSchema']['required'])
+            self.assertIn('expected_revision',tools['snooze_control']['inputSchema']['required'])
+            self.assertIn('delivery_id',tools['snooze_acknowledge']['inputSchema']['required'])
+            self.assertIn('snooze_snapshot',tools)
+
     def test_scope_and_auth_cannot_be_bypassed_by_tool_calls(self):
         with tempfile.TemporaryDirectory() as d:
             repo=TaskRepository(Path(d)/'s.sqlite')

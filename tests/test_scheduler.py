@@ -66,6 +66,25 @@ class SchedulerTests(unittest.TestCase):
         for t in threads:t.start()
         for t in threads:t.join()
         self.assertEqual(len(self.adapter.launches),1)
+
+    def test_cancel_receipt_releases_only_after_provider_acknowledgment(self):
+        self.add(); self.scheduler.tick('p',100)
+        attempt=self.repo.active('p')[0]
+        self.repo.update_attempt(attempt['id'],'cancel_pending',now=101)
+        self.scheduler.tick('p',102); self.assertEqual(len(self.repo.active('p')),1)
+        self.adapter.state='cancelled'; self.scheduler.tick('p',103)
+        self.assertEqual(self.repo.active('p'),[])
+        self.assertEqual(self.repo.get('t')['state'],'cancelled')
+
+    def test_policy_changed_between_routing_and_reservation_cannot_launch(self):
+        self.add()
+        reserve=self.repo.reserve
+        def racing(*args,**kwargs):
+            self.scheduler.configure('p',{'emergency_stop':True})
+            return reserve(*args,**kwargs)
+        self.repo.reserve=racing
+        self.scheduler.tick('p',100)
+        self.assertEqual(self.adapter.launches,[])
     def test_recoveries_have_persisted_backoff_and_stop_after_two(self):
         self.add(); self.scheduler.tick('p',100); self.adapter.state='failed'
         self.scheduler.tick('p',101); self.scheduler.tick('p',102)

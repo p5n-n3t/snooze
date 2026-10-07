@@ -112,7 +112,7 @@ class TaskRepository:
         data = task['spec']; data['scope_keys'] = tuple(data['scope_keys']); data['dependencies'] = tuple(data['dependencies'])
         return TaskSpec(**data)
 
-    def reserve(self, task_id, account_id, scope_keys, now):
+    def reserve(self, task_id, account_id, scope_keys, now, *, policy_revision=None, override_pause=False):
         scopes = tuple(sorted(set(normalized_scope(s) for s in scope_keys)))
         with self.connection(True) as c:
             task = self.decode(c.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone())
@@ -125,8 +125,12 @@ class TaskRepository:
                 capacity = json.loads(account['data']).get('capacity', 1)
                 occupied = c.execute('SELECT COUNT(*) FROM attempts WHERE account=? AND released_at IS NULL', (account_id,)).fetchone()[0]
                 if occupied >= capacity: raise ValueError('Account capacity occupied')
-            policy_row = c.execute('SELECT data FROM policy_settings WHERE project=?', (task['project'],)).fetchone()
+            policy_row = c.execute('SELECT data,revision FROM policy_settings WHERE project=?', (task['project'],)).fetchone()
             policy = json.loads(policy_row['data']) if policy_row else {}
+            if policy_revision is not None:
+                owner=c.execute('SELECT executor FROM projects WHERE id=?',(task['project'],)).fetchone()
+                if not owner or owner['executor']!='snooze' or not policy_row or policy_row['revision']!=policy_revision or policy.get('emergency_stop') or (policy.get('pause_dispatch',True) and not override_pause):
+                    raise ValueError('Dispatch ownership or policy changed')
             project_count = c.execute('SELECT COUNT(*) FROM attempts WHERE project=? AND released_at IS NULL', (task['project'],)).fetchone()[0]
             total_count = c.execute('SELECT COUNT(*) FROM attempts WHERE released_at IS NULL').fetchone()[0]
             if project_count >= policy.get('max_concurrent', 12) or total_count >= policy.get('global_concurrent', 24):

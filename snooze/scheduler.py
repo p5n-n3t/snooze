@@ -97,6 +97,13 @@ class Scheduler:
                     if not attempt['session']: continue
                     observation=adapter.observe(attempt['session'])
                     self._record(project_id,'provider_observed',{'account':attempt['account'],**{k:observation.get(k) for k in ('status','model','effort')}},attempt['task'],attempt['id'],now)
+                    if attempt['state']=='cancel_pending':
+                        if observation.get('status') in ('cancelled','canceled'):
+                            self.repo.update_attempt(attempt['id'],'cancelled',now=now)
+                            self.repo.release(attempt['id'],{'cancelled':True})
+                            decisions.append({'task':attempt['task'],'action':'cancel_confirmed'})
+                        else: decisions.append({'task':attempt['task'],'action':'awaiting_cancel_ack'})
+                        continue
                     artifact=adapter.collect(attempt) if adapter.capabilities().get('collect',{}).get('supported') else None
                     if artifact is not None:
                         decisions.append(self._validate(attempt,artifact,now)); continue
@@ -126,7 +133,7 @@ class Scheduler:
                 if not eligible:
                     decisions.append({'task':spec.id,'action':'no_eligible_route','routes':explanations}); continue
                 account=min(eligible)[1]
-                try: receipt=self.repo.reserve(spec.id,account,spec.scope_keys,now)
+                try: receipt=self.repo.reserve(spec.id,account,spec.scope_keys,now,policy_revision=settings['revision'],override_pause=manual and override_pause)
                 except ValueError as e:
                     decisions.append({'task':spec.id,'action':'reservation_conflict'}); continue
                 attempt=self.repo.attempt(receipt.attempt_id)

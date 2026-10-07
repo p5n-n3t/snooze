@@ -37,7 +37,7 @@ class Control:
             if action=='account-config':
                 account=self.registry.get(target_id); revision=account['revision'] if account else 0
                 if expected_revision!=revision: raise ValueError('Stale revision')
-                updated=self.registry.upsert_public_config(target_id,values)
+                updated=self.registry.upsert_public_config(target_id,values,expected_revision=expected_revision)
                 revision=updated['revision']; return receipt('confirmed')
             task=self.repo.get(target_id)
             if not task or task['project']!=project_id: return receipt('rejected','Unknown task in this project',404)
@@ -45,6 +45,7 @@ class Control:
             if expected_revision!=revision: raise ValueError('Stale revision')
             active=next((a for a in self.repo.active(project_id) if a['task']==target_id),None)
             if action in ('retry','resume','reassign'):
+                if action=='reassign': return receipt('rejected','Reassignment needs confirmed inactive ownership and a new approved routing requirement; direct account reassignment is not supported.',409)
                 if owner!='snooze': return receipt('rejected','Project is externally managed; no provider mutation permitted.',409)
                 if settings['emergency_stop']: return receipt('rejected','Emergency stop is active.',409)
                 if settings['pause_dispatch'] and values.get('override_pause') is not True: return receipt('rejected','Dispatch paused; explicit one-off override required.',409)

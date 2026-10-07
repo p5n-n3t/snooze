@@ -35,3 +35,30 @@ class OutboxTests(unittest.TestCase):
         box.deliver_due(500);box.deliver_due(1000)
         self.assertEqual(len(calls),3)
         self.assertEqual(box.list('p')[0]['state'],'failed')
+
+    def test_inflight_crash_reuses_delivery_id_with_a_bounded_recovery(self):
+        sent=[]
+        box=Outbox(self.repo,lambda channel,payload: sent.append(payload['delivery_id']) or {'state':'accepted'})
+        id=box.enqueue('i','test',{'project':'p'},100)
+        with self.repo.connection(True) as c:
+            c.execute('UPDATE outbox SET state="sending",attempts=1,sending_at=100 WHERE id=?',(id,))
+        box.deliver_due(110); self.assertEqual(sent,[])
+        restarted=Outbox(TaskRepository(self.repo.path),box.deliver)
+        restarted.deliver_due(131)
+        self.assertEqual(sent,[id])
+        self.assertEqual(restarted.list('p')[0]['state'],'accepted')
+
+    def test_concurrent_acknowledgment_is_not_overwritten_by_send_receipt(self):
+        box=Outbox(self.repo);box.register_coordinator('coord',['p'])
+        def receiver(channel,payload):
+            box.acknowledge(payload['delivery_id'],'coord')
+            return {'state':'accepted'}
+        box.deliver=receiver
+        box.enqueue('i','test',{'project':'p'},100);box.deliver_due(100)
+        self.assertEqual(box.list('p')[0]['state'],'acknowledged')
+
+    def test_resolved_incident_is_not_sent_late(self):
+        sent=[];box=Outbox(self.repo,lambda channel,payload:sent.append(1) or {'state':'accepted'})
+        box.enqueue('i','test',{'project':'p'},100)
+        box.resolve('i',{'verified_state_change':True});box.deliver_due(200)
+        self.assertEqual(sent,[])

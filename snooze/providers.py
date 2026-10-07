@@ -23,10 +23,12 @@ class ProviderRegistry:
             row = c.execute('SELECT * FROM provider_configs WHERE id=?', (id,)).fetchone()
             return {**json.loads(row['data']), 'revision': row['revision']} if row else None
 
-    def upsert_public_config(self, account_id, values, *, trusted=False):
+    def upsert_public_config(self, account_id, values, *, trusted=False, expected_revision=None):
         if not isinstance(values, dict) or set(values) - (PUBLIC_FIELDS | (BACKEND_FIELDS if trusted else {'mcp_key','workspace_id'})):
             raise ValueError('Unknown/private configuration fields')
         current = self.get(account_id) or {'id': account_id, 'label': account_id, 'adapter': 'lightsprint', 'enabled': True, 'capacity': 12, 'models': [], 'efforts': ['low'], 'reserve': 0, 'health': 'unknown'}
+        original_revision = current.get('revision',0)
+        if expected_revision is not None and expected_revision != original_revision: raise ValueError('Stale revision')
         current.update(values)
         if current['adapter'] not in ADAPTERS: raise ValueError('Unknown adapter')
         capacity = current['capacity']
@@ -41,7 +43,7 @@ class ProviderRegistry:
             value = current.get(field, 0)
             if not isinstance(value, (int,float)) or isinstance(value,bool) or not math.isfinite(value) or (field != 'priority' and value < 0): raise ValueError('Invalid ' + field)
         override = current.get('quota_override')
-        if override is not None:
+        if override is not None and 'quota_override' in values:
             if not isinstance(override, dict) or set(override) - {'value','unit','expires_at'}: raise ValueError('Invalid quota override')
             value = override.get('value')
             if not isinstance(value, (int,float)) or isinstance(value,bool) or not math.isfinite(value) or value < 0: raise ValueError('Invalid quota value')
@@ -50,6 +52,8 @@ class ProviderRegistry:
             current['quota_override'] = {**override, 'source':'operator', 'observed_at':time.time()}
         current.pop('revision', None)
         with self.repo.connection(True) as c:
+            row=c.execute('SELECT revision FROM provider_configs WHERE id=?',(account_id,)).fetchone()
+            if (row['revision'] if row else 0) != original_revision: raise ValueError('Stale revision')
             c.execute('INSERT INTO provider_configs(id,data,revision) VALUES(?,?,1) ON CONFLICT(id) DO UPDATE SET data=excluded.data,revision=revision+1', (account_id,json.dumps(current)))
             self.repo.event(c, 'system', 'account_configured', {'account':account_id})
         return self.public(self.get(account_id))
@@ -62,7 +66,7 @@ class ProviderRegistry:
         return RegisteredAdapter(config)
 
     def public(self, config):
-        return {**{k:config.get(k) for k in PUBLIC_FIELDS}, 'id':config['id'], 'revision':config.get('revision',0), 'identity':None, 'quota':self.snapshot(config['id']).quota, 'health':config.get('health','unknown'), 'capabilities':self.adapter(config['id']).capabilities()}
+        return {**{k:config.get(k) for k in PUBLIC_FIELDS}, 'id':config['id'], 'server_key':config['id'], 'revision':config.get('revision',0), 'identity':None, 'quota':self.snapshot(config['id']).quota, 'health':config.get('health','unknown'), 'capabilities':self.adapter(config['id']).capabilities()}
 
     def list_public(self):
         with self.repo.connection() as c: ids = [r['id'] for r in c.execute('SELECT id FROM provider_configs ORDER BY id')]

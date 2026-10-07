@@ -15,6 +15,12 @@ class MCPFacade:
         if not isinstance(token,str) or not hmac.compare_digest(token,self.token):raise PermissionError('Authentication required')
         project=arguments.get('project')
         if project not in self.projects:raise PermissionError('Project is outside registered scope')
+        if tool=='snapshot':
+            from snooze.control_views import task_row
+            result={'project':self.repo.project(project),'tasks':[task_row(t) for t in self.repo.list(project)[:100]]}
+            if self.control:
+                result.update(settings=self.control.scheduler.settings(project),accounts=self.control.registry.list_public())
+            return result
         if tool=='events':return EventFeed(self.repo).read(project,arguments.get('after',0),arguments.get('limit',100))
         if tool=='incidents':return {'deliveries':self.outbox.list(project),'mode':'inbox-only'}
         if tool=='tasks':
@@ -36,7 +42,15 @@ class MCPFacade:
         try:
             if method=='initialize':result={'protocolVersion':'2025-03-26','capabilities':{'tools':{}},'serverInfo':{'name':'snooze','version':'0.2.0'}}
             elif method=='tools/list':
-                result={'tools':[{'name':'snooze_'+name,'description':'Scoped Snooze '+name,'inputSchema':{'type':'object','properties':{'project':{'type':'string'}},'required':['project'],'additionalProperties':True}} for name in ('events','incidents','tasks','task','control','register','acknowledge')]}
+                fields={
+                    'snapshot':{},'events':{'after':{'type':'integer','minimum':0},'limit':{'type':'integer','minimum':1,'maximum':200}},
+                    'incidents':{},'tasks':{},'task':{'task_id':{'type':'string'}},
+                    'control':{'action':{'type':'string','enum':['hold','approve','prioritize','resume','retry','cancel','reassign','account-config','policy-config','dispatch-pause','emergency-stop']},'target_id':{'type':'string'},'values':{'type':'object'},'expected_revision':{'type':'integer','minimum':0}},
+                    'register':{'coordinator_id':{'type':'string'}},'acknowledge':{'coordinator_id':{'type':'string'},'delivery_id':{'type':'string'}}}
+                optional={'events':{'after','limit'},'control':{'values'}}
+                result={'tools':[{'name':'snooze_'+name,'description':'Scoped Snooze '+name+'; delivery acceptance is not acknowledgment or resolution.',
+                    'inputSchema':{'type':'object','properties':{'project':{'type':'string'},**properties},'required':['project',*[k for k in properties if k not in optional.get(name,set())]],'additionalProperties':False}}
+                    for name,properties in fields.items()]}
             elif method=='tools/call':
                 params=message['params'];name=params['name']
                 if not name.startswith('snooze_'):raise ValueError('Unknown tool')
