@@ -42,6 +42,11 @@ def main():
     opener = subs.add_parser('open'); opener.add_argument('--port',type=int,default=8765); opener.add_argument('--no-browser',action='store_true')
     mcp = subs.add_parser('mcp')
     enqueue = subs.add_parser('enqueue');enqueue.add_argument('--file',type=Path,required=True);enqueue.add_argument('--approve',action='store_true')
+    history=subs.add_parser('history');history.add_argument('--format',choices=['json','csv'],default='json');history.add_argument('--from-utc');history.add_argument('--to-utc');history.add_argument('--timezone',default='UTC')
+    importer=subs.add_parser('import-history');importer.add_argument('--file',type=Path,required=True);importer.add_argument('--source',required=True);importer.add_argument('--cursor',required=True)
+    provider=subs.add_parser('configure-provider');provider.add_argument('--id',required=True);provider.add_argument('--file',type=Path,required=True)
+    engine=subs.add_parser('configure-engine');engine.add_argument('--url',required=True);engine.add_argument('--allow-host',action='append',required=True);engine.add_argument('--project-mapping',required=True);engine.add_argument('--credential-ref')
+    engine_test=subs.add_parser('test-engine')
     service = subs.add_parser('install-service');service.add_argument('--name',default='snooze.service');service.add_argument('--port',type=int,default=8765)
     for command in ('status', 'incidents', 'check', 'config'):
         subs.add_parser(command)
@@ -52,9 +57,30 @@ def main():
     if args.command == 'init':
         print(json.dumps(prime(args.repo, state, args.queue), indent=2)); return
     config = json.loads((state / 'project.json').read_text())
+    if args.command=='configure-engine':
+        from snooze.engine_setup import configure_engine
+        print(json.dumps(configure_engine(state,args.url,args.allow_host,args.project_mapping,args.credential_ref)));return
     from snooze.runtime import Runtime
     runtime = Runtime(state,config)
     store = runtime.store; project = runtime.project
+    if args.command=='test-engine':
+        print(json.dumps(runtime.history.engine_report({'kind':['analytics_summary']})));return
+    if args.command=='history':
+        import sys
+        query={'format':[args.format],'timezone':[args.timezone]}
+        for key in ('from_utc','to_utc'):
+            if getattr(args,key):query[key]=[getattr(args,key)]
+        sys.stdout.buffer.write(runtime.history.export(query)[1]);return
+    if args.command=='import-history':
+        from dataclasses import asdict
+        if args.file.stat().st_size>1024*1024:parser.error('History page exceeds 1 MiB')
+        print(json.dumps(asdict(runtime.history.ingest(args.source,args.cursor,json.loads(args.file.read_text())))));return
+    if args.command=='configure-provider':
+        if args.file.stat().st_size>8192:parser.error('Provider config exceeds 8 KiB')
+        current=runtime.registry.get(args.id)
+        result=runtime.registry.upsert_public_config(args.id,json.loads(args.file.read_text()),trusted=True,expected_revision=current['revision'] if current else 0,project_id=project)
+        runtime.registry.authorize(args.id,project,manage=True)
+        print(json.dumps(result));return
     if args.command == 'install-service':
         from snooze.service import install_service
         print(install_service(state,args.name,args.port));return
@@ -84,5 +110,5 @@ def main():
             webbrowser.open(f'http://127.0.0.1:{args.port}')
         from snooze.web import serve
         try:
-            serve(store, project, runtime, (state / 'control-token').read_text(), args.port,project_config=config,control=runtime.control)
+            serve(store, project, runtime, (state / 'control-token').read_text(), args.port,project_config=config,control=runtime.control,history=runtime.history)
         finally: runtime.stop()

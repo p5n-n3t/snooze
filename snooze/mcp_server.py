@@ -18,7 +18,7 @@ class MCPFacade:
         if project not in self.projects:raise PermissionError('Project is outside registered scope')
         if tool=='snapshot':
             from snooze.control_views import task_row
-            result={'project':self.repo.project(project),'tasks':[task_row(t) for t in self.repo.list(project)[:100]]}
+            result={'project':self.repo.project(project),**self.repo.queue_page(project,limit=100)}
             if self.control:
                 result.update(settings=self.control.scheduler.settings(project),accounts=self.control.registry.list_public(project))
             return result
@@ -26,7 +26,7 @@ class MCPFacade:
         if tool=='incidents':return {'deliveries':self.outbox.list(project),'mode':'inbox-only'}
         if tool=='tasks':
             from snooze.control_views import task_row
-            return {'tasks':[task_row(t) for t in self.repo.list(project)[:100]]}
+            return self.repo.queue_page(project,limit=100)
         if tool=='task' and self.control:
             from snooze.control_views import managed_task_detail
             return managed_task_detail(self.control,project,arguments.get('task_id'))

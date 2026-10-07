@@ -38,7 +38,7 @@ def extend_dashboard(state, control, project):
                               'references':[], 'attempt_id':attempt['id']})
     state['slots'].extend(managed_slots)
     state['summary']['active_tasks']=len(state['slots'])
-    state['summary']['queue_tasks']=len(control.repo.list(project))
+    state['summary']['queue_tasks']=control.repo.queue_page(project,limit=1)['total']
     with control.repo.connection() as c:
         row=c.execute('SELECT at,data FROM events WHERE project=? AND kind="monitor_finished" ORDER BY id DESC LIMIT 1',(project,)).fetchone()
         start=c.execute('SELECT at FROM events WHERE project=? AND kind="monitor_started" ORDER BY id DESC LIMIT 1',(project,)).fetchone()
@@ -57,7 +57,10 @@ def managed_task_detail(control, project, task_id):
         for artifact in control.repo.artifacts(attempt['id']):
             url=artifact['reference'].get('url')
             if _safe_reference(url):references.append(url)
+    with control.repo.connection() as c:
+        rows=c.execute('SELECT id,task,attempt,kind,at,data FROM events WHERE project=? AND task=? ORDER BY id DESC LIMIT 200',(project,task_id)).fetchall()
+    events=[{**{k:r[k] for k in ('id','task','attempt','kind','at')},'data':public_event(json.loads(r['data']))} for r in reversed(rows)]
     return {'task_id':task_id,'summary':task['instructions'][:160],'instruction':task['instructions'],'state':task['state'],
             'revision':task['revision'],'scope_keys':task['spec']['scope_keys'],'approved':task['spec']['approved'],
-            'attempts':attempts,'events':[e for e in EventFeed(control.repo).read(project,limit=200)['events'] if e['task']==task_id],
+            'attempts':attempts,'events':events,
             'references':references}
