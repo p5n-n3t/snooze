@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,7 +17,7 @@ class MigrationTests(unittest.TestCase):
             store.incident('p', 'a', 'idle', 'No result')
             first = migrate_state(path)
             self.assertTrue(first.backup_path.exists())
-            with sqlite3.connect(first.backup_path) as c:
+            with closing(sqlite3.connect(first.backup_path)) as c:
                 self.assertEqual(c.execute('SELECT COUNT(*) FROM jobs').fetchone()[0], 1)
                 self.assertEqual(c.execute('SELECT COUNT(*) FROM observations').fetchone()[0], 1)
                 self.assertEqual(c.execute('SELECT COUNT(*) FROM incidents').fetchone()[0], 1)
@@ -32,6 +33,6 @@ class MigrationTests(unittest.TestCase):
                 connection.execute('CREATE TABLE must_not_persist(x)')
                 raise RuntimeError('fixture failure')
             with self.assertRaises(RuntimeError): migrate_state(path, before_commit=fail)
-            with sqlite3.connect(path) as c:
+            with closing(sqlite3.connect(path)) as c:
                 self.assertIsNone(c.execute("SELECT name FROM sqlite_master WHERE name='must_not_persist'").fetchone())
             self.assertEqual(Store(path).snapshot('p')['workers'][0]['id'], 'a')
