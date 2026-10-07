@@ -9,6 +9,30 @@ function publicAccounts() {
   }));
 }
 
+test("integrated History reads scoped analytics and exports through the real Python API", async ({page}) => {
+  const errors:string[]=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('/');
+  await page.getByTestId('nav-history').click();
+  const report=page.getByTestId('rich-history-page');
+  await expect(report.getByText('Recorded events',{exact:true})).toBeVisible();
+  await expect(report.getByText('Input tokens',{exact:true})).toBeVisible();
+  const exported=await report.getByRole('link',{name:'Export JSON'}).getAttribute('href');
+  const response=await page.evaluate(async url=>{
+    const r=await fetch(url!);return {status:r.status,body:await r.json()};
+  },exported);
+  expect(response.status).toBe(200);
+  expect(response.body.filters.project_id).toBe('trump-files');
+  expect(response.body.native.summary.input_tokens.value).toBeGreaterThan(0);
+  expect(JSON.stringify(response.body)).not.toContain('e2e-cookie-token');
+  await page.getByRole('button',{name:'Switch to light theme'}).click();
+  await expect(report).toBeVisible();
+  await page.setViewportSize({width:390,height:844});
+  await expect(report.getByRole('link',{name:'Export JSON'})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBeTruthy();
+  expect(errors).toEqual([]);
+});
+
 async function installCoordinatorFixture(page: Page, options: { managed?: boolean } = {}) {
   let policy: Record<string, unknown> = {
     interval: 300, pause_dispatch: true, emergency_stop: false, max_concurrent: 12, global_concurrent: 24,

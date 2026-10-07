@@ -65,6 +65,9 @@ export interface DashboardState {
     global_concurrent?: number;
     max_recoveries?: number;
     backoff_seconds?: number;
+    stall_seconds?: number;
+    observation_workers?: number;
+    request_timeout?: number;
     reserve?: number;
     allow_unknown_quota?: boolean;
     allow_native?: boolean;

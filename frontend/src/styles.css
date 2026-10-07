@@ -107,9 +107,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 
 .command-shell { min-height: 100vh; display: flex; }
 .rail { position: fixed; inset: 0 auto 0 0; z-index: 10; width: 208px; display: flex; flex-direction: column; padding: 23px 14px 16px; background: var(--bg-surface); border-right: 1px solid var(--border-default); }
-.brand { height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 9px; color: var(--text-primary); text-decoration: none; }
-.brand img { width: 26px; height: 26px; object-fit: contain; }
-.brand-word { font-size: 19px; line-height: 1; font-weight: 690; letter-spacing: -.06em; }
+.brand { height: 76px; display: flex; align-items: center; padding: 0 9px; color: var(--text-primary); text-decoration: none; }
+.brand img { width: 168px; height: 68px; object-fit: contain; }
 .rail-project { margin: 35px 3px 21px; display: grid; gap: 8px; }
 .rail-label, .top-project > span { color: var(--text-muted); font-size: 9px; font-weight: 700; letter-spacing: .11em; }
 .rail-project .kit-select { width: 100%; }

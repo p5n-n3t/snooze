@@ -5,6 +5,7 @@
   import Queue from "./components/Queue.svelte";
   import Providers from "./components/Providers.svelte";
   import History from "./components/History.svelte";
+  import HistoryPage from "./components/history/HistoryPage.svelte";
   import Settings from "./components/Settings.svelte";
   import TaskDrawer from "./components/TaskDrawer.svelte";
   import { getDashboardState, getHistory, getInbox, getQueue, getTaskDetail, getProviders, postControl, postLegacy } from "./lib/api";
@@ -262,6 +263,7 @@
     {:else if page === "providers"}
       <Providers {dashboard} oncontrol={control} />
     {:else if page === "history"}
+      <HistoryPage oninspect={inspect} />
       <History entries={historyEntries} total={historyTotal} offset={historyOffset} limit={historyLimit} query={historyQuery} loading={historyLoading} error={historyError} oninspect={inspect} onpage={navigateHistory} onsearch={searchHistory} />
     {:else}
       <Settings {dashboard} saving={saving || controlSaving} {notice} onsave={saveInterval} onpolicy={savePolicy} oncontrol={control} />

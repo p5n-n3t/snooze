@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import sys
 import time
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -99,7 +100,19 @@ class FixtureMonitor:
 
 
 if __name__ == "__main__":
+    from snooze.tasks import TaskRepository
+    from snooze.history_api import HistoryAPI
+    from snooze.history_ingest import HistoryIngestor
+    fixture_directory=tempfile.TemporaryDirectory(prefix="snooze-browser-fixture-")
+    repo=TaskRepository(Path(fixture_directory.name)/'history.sqlite')
+    repo.register_project('trump-files','/fixture/project')
+    now=time.time()
+    HistoryIngestor(repo).ingest_events('browser-fixture','seed',[
+        {'event_id':f'fixture-{index}','at':now-index*3600,'kind':'usage','project_id':'trump-files',
+         'account_id':f'lightsprint{index%9+1}','session_id':f'fixture-session-{index//3}',
+         'model':'fixture-small','effort':'low','input_tokens':100+index,'output_tokens':50+index}
+        for index in range(120)])
     accounts = {f"lightsprint{index}": {"enabled": True} for index in range(1, 10)}
     config = {"ownership": "external", "dispatcher": "external", "mcp_servers": accounts}
-    server = _make_server(FixtureStore(), "trump-files", FixtureMonitor(), "e2e-cookie-token", port=4179, project_config=config)
+    server = _make_server(FixtureStore(), "trump-files", FixtureMonitor(), "e2e-cookie-token", port=4179, project_config=config,history=HistoryAPI(repo,'trump-files'))
     server.serve_forever()

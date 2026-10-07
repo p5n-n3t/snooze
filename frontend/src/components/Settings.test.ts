@@ -10,6 +10,9 @@ describe("operational settings", () => {
     render(Settings, { props: { dashboard, saving: false, notice: "", onsave: vi.fn(), onpolicy } });
 
     await fireEvent.click(screen.getByRole("button", { name: /Dispatch/ }));
+    expect(screen.getByLabelText("Busy-worker stall threshold (seconds)")).toHaveValue(900);
+    expect(screen.getByLabelText("Concurrent observation requests")).toHaveValue(4);
+    expect(screen.getByLabelText("Provider request timeout (seconds)")).toHaveValue(20);
     expect(screen.getByLabelText("Maximum recoveries")).toHaveValue(2);
     expect(screen.getByLabelText("Allow native workers")).not.toBeChecked();
     expect(screen.getByText(/does not kill already-running remote workers/i)).toBeInTheDocument();

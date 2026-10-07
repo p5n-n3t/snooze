@@ -12,8 +12,8 @@ describe("TaskDrawer", () => {
           summary: "Inspect output",
           instruction: '<img src=x onerror="alert(1)"> literal prompt',
           state: "running",
-          attempts: [],
-          events: [],
+          attempts: [{generation:1,state:"blocked"}],
+          events: [{kind:"validation_failed",data:{reason:"Missing output ID"}}],
           references: ["javascript:alert(1)", "https://user:secret@example.test/private", "https://docs.example.test/runbook"],
         },
         slot: null,
@@ -25,5 +25,6 @@ describe("TaskDrawer", () => {
     expect(document.querySelector("img")).not.toBeInTheDocument();
     expect(screen.getAllByRole("link")).toHaveLength(1);
     expect(screen.getByRole("link")).toHaveAttribute("href", "https://docs.example.test/runbook");
+    expect(screen.getByText(/Missing output ID/)).toBeInTheDocument();
   });
 });

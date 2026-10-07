@@ -27,9 +27,14 @@
         <section class="drawer-section"><div class="drawer-section-heading"><h2>Evidence links</h2><span>{references.length} validated HTTPS references</span></div>
           {#if references.length}<ul class="evidence-links">{#each references as reference (reference)}<li><a href={reference} target="_blank" rel="noopener noreferrer">{reference}<ExternalLinkIcon size={13} aria-hidden="true" /></a></li>{/each}</ul>{:else}<p class="drawer-muted">No safe evidence links were recorded.</p>{/if}
         </section>
-        <section class="drawer-section"><div class="drawer-section-heading"><h2>Attempts & events</h2><span>{detail.attempts.length + detail.events.length} records</span></div>{#if detail.attempts.length || detail.events.length}<p class="drawer-muted">Attempt and event details are available in the backend record.</p>{:else}<div class="missing-evidence"><CircleHelpIcon size={16} aria-hidden="true" /><span>This read API does not include an attempt or event timeline yet.</span></div>{/if}</section>
+        <section class="drawer-section"><div class="drawer-section-heading"><h2>Attempts & events</h2><span>{detail.attempts.length + detail.events.length} records</span></div>
+          {#if detail.attempts.length || detail.events.length}
+            {#each detail.attempts as attempt, index}<details><summary>Attempt {String(attempt.generation ?? index + 1)} · {String(attempt.state ?? "unknown")}</summary><pre class="instruction-block">{JSON.stringify(attempt,null,2)}</pre></details>{/each}
+            {#each detail.events as event}<details><summary>{String(event.kind ?? "Event")} · {formatTimestamp(typeof event.at === "number" ? event.at : null)}</summary><pre class="instruction-block">{JSON.stringify(event,null,2)}</pre></details>{/each}
+          {:else}<div class="missing-evidence"><CircleHelpIcon size={16} aria-hidden="true" /><span>No attempt or event timeline was supplied for this task.</span></div>{/if}
+        </section>
       {:else if !loading && !error}<div class="drawer-loading">No task detail is available.</div>{/if}
     </div>
-    {#snippet footer()}<span class="drawer-footer-note">Mutations report backend receipts; none are enabled in this service.</span><button type="button" class="unsupported-action" disabled title={unavailableAction}>Resume</button>{/snippet}
+    {#snippet footer()}<span class="drawer-footer-note">Use Queue for supported interventions. Resume requires a confirmed adapter capability.</span><button type="button" class="unsupported-action" disabled title={unavailableAction}>Resume</button>{/snippet}
   </DetailDrawer>
 {/if}

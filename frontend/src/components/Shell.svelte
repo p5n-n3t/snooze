@@ -37,7 +37,6 @@
   <aside class="rail" aria-label="Snooze navigation">
     <a href="#watch" class="brand" onclick={(event) => { event.preventDefault(); onnav("watch"); }} aria-label="Snooze Watch">
       <img src={snoozeLogo} alt="" />
-      <span class="brand-word">snooze</span>
     </a>
     <div class="rail-project">
       <span class="rail-label">PROJECT</span>
