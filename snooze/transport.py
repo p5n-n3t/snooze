@@ -1,5 +1,6 @@
 """Credential-local MCP transport; never return request headers."""
 import json
+import re
 import tomllib
 import urllib.request
 from pathlib import Path
@@ -61,7 +62,13 @@ class LightSprint:
         envelope = rpc('tools/call', {'name': 'lightsprint_api', 'arguments': arguments}, 2)
         result = envelope.get('result', {})
         if envelope.get('error') or result.get('isError'):
-            raise RuntimeError('Provider rejected request; inspect provider task for details')
+            details = envelope.get('error',{}).get('message','') if isinstance(envelope.get('error'),dict) else ''
+            if not details:
+                details = ' '.join(item.get('text','') for item in result.get('content',[]) if item.get('type')=='text')
+            # Retain actionable provider rejection evidence, never auth headers or
+            # unbounded responses. This exception stays backend-only.
+            details=re.sub(r'(?i)Bearer\s+\S+|lsat_[A-Za-z0-9_-]+','[redacted]',details)
+            raise RuntimeError('Provider rejected request: '+details[:500])
         for item in result.get('content', []):
             if item.get('type') == 'text':
                 return json.loads(item['text'])

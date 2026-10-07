@@ -45,7 +45,17 @@ class Scheduler:
     def _record(self, project, kind, payload, task=None, attempt=None, now=None):
         with self.repo.connection(True) as c: self.repo.event(c,project,kind,payload,task,attempt,now)
 
+    def _cooldown(self,account,settings,now,error_kind):
+        config=self.registry.get(account)
+        count=min(config.get('failure_count',0)+1,16)
+        self.registry.upsert_public_config(account,{'failure_count':count,'error_kind':error_kind,
+            'cooldown_until':now+min(settings['backoff_seconds']*(2**min(count-1,6)),3600)},trusted=True)
+
     def _validate(self, attempt, artifact, now):
+        generation=artifact.get('generation',attempt['generation']) if isinstance(artifact,dict) else attempt['generation']
+        if generation!=attempt['generation']:
+            self.repo.record_artifact(attempt['id'],generation,artifact)
+            return {'task':attempt['task'],'action':'late_artifact_quarantined'}
         spec=self.repo.spec(attempt['task']); result=self.validators.validate(spec,artifact)
         accepted=self.repo.record_artifact(attempt['id'],attempt['generation'],artifact)
         with self.repo.connection(True) as c:
@@ -58,6 +68,7 @@ class Scheduler:
         return {'task':spec.id,'action':'validation_failed'}
 
     def _recover(self, attempt, adapter, status, settings, now):
+        if not self.registry.authorized(attempt['account'],attempt['project']):return 'account_scope_unverified'
         if settings['pause_dispatch'] or settings['emergency_stop']: return 'recovery_paused'
         data=attempt['data']; count=data.get('recovery_count',0)
         if now < data.get('recovery_due',0): return 'recovery_backoff'
@@ -65,12 +76,12 @@ class Scheduler:
             self.repo.update_attempt(attempt['id'],'blocked',data={'reason':'Recovery limit exhausted'},now=now)
             return 'recovery_exhausted'
         if not adapter.capabilities().get('resume',{}).get('supported'): return 'resume_unsupported'
-        next_data={'recovery_count':count+1,'recovery_due':now+settings['backoff_seconds']*(2**count)}
+        next_data={'recovery_count':count+1,'recovery_due':now+settings['backoff_seconds']*(2**count),'resume_message_id':str(uuid.uuid4())}
         # Persist the bound before network I/O; a crash cannot reset the budget.
         self.repo.update_attempt(attempt['id'],'awaiting_output',data=next_data,now=now)
         task=self.repo.get(attempt['task'])
         try:
-            adapter.resume(attempt['session'],{**attempt,'instructions':task['instructions']})
+            adapter.resume(attempt['session'],{**self.repo.attempt(attempt['id']),'instructions':task['instructions']})
             return 'resume_requested'
         except Exception:
             self.repo.update_attempt(attempt['id'],'ambiguous',data={'reason':'Resume acceptance uncertain'},now=now)
@@ -97,6 +108,13 @@ class Scheduler:
                     if not attempt['session']: continue
                     observation=adapter.observe(attempt['session'])
                     self._record(project_id,'provider_observed',{'account':attempt['account'],**{k:observation.get(k) for k in ('status','model','effort')}},attempt['task'],attempt['id'],now)
+                    if attempt['state']=='cancel_pending':
+                        if observation.get('status') in ('cancelled','canceled'):
+                            self.repo.update_attempt(attempt['id'],'cancelled',now=now)
+                            self.repo.release(attempt['id'],{'cancelled':True})
+                            decisions.append({'task':attempt['task'],'action':'cancel_confirmed'})
+                        else: decisions.append({'task':attempt['task'],'action':'awaiting_cancel_ack'})
+                        continue
                     artifact=adapter.collect(attempt) if adapter.capabilities().get('collect',{}).get('supported') else None
                     if artifact is not None:
                         decisions.append(self._validate(attempt,artifact,now)); continue
@@ -105,10 +123,13 @@ class Scheduler:
                         action=self._recover(attempt,adapter,status,settings,now) if managed and status=='failed' and attempt['state']!='blocked' else 'awaiting_saved_output'
                         decisions.append({'task':attempt['task'],'action':action})
                 except Exception as e:
+                    self._cooldown(attempt['account'],settings,now,type(e).__name__)
                     errors.append({'task':attempt['task'],'account':attempt['account'],'kind':type(e).__name__})
-            active=self.repo.active(project_id); counts=Counter(a['account'] for a in active)
-            configs={a['id']:self.registry.get(a['id']) for a in self.registry.list_public()}
-            with self.repo.connection() as c: global_count=c.execute('SELECT COUNT(*) FROM attempts WHERE released_at IS NULL').fetchone()[0]
+            active=self.repo.active(project_id)
+            configs={a['id']:self.registry.get(a['id']) for a in self.registry.list_public(project_id)}
+            with self.repo.connection() as c:
+                global_count=c.execute('SELECT COUNT(*) FROM attempts WHERE released_at IS NULL').fetchone()[0]
+                counts=Counter({r['account']:r['occupied'] for r in c.execute('SELECT account,COUNT(*) AS occupied FROM attempts WHERE released_at IS NULL GROUP BY account')})
             for task in self.repo.list(project_id):
                 if only_task and task['id']!=only_task: continue
                 if task['state'] not in ('queued','retry_due') or task['due_at']>now: continue
@@ -126,7 +147,7 @@ class Scheduler:
                 if not eligible:
                     decisions.append({'task':spec.id,'action':'no_eligible_route','routes':explanations}); continue
                 account=min(eligible)[1]
-                try: receipt=self.repo.reserve(spec.id,account,spec.scope_keys,now)
+                try: receipt=self.repo.reserve(spec.id,account,spec.scope_keys,now,policy_revision=settings['revision'],override_pause=manual and override_pause)
                 except ValueError as e:
                     decisions.append({'task':spec.id,'action':'reservation_conflict'}); continue
                 attempt=self.repo.attempt(receipt.attempt_id)
@@ -137,6 +158,8 @@ class Scheduler:
                     self.repo.update_attempt(receipt.attempt_id,'running',session=launched['session_id'],data=launched,now=now)
                     decisions.append({'task':spec.id,'action':'launched','account':account,'attempt':receipt.attempt_id})
                 except Exception as e:
+                    self._cooldown(account,settings,now,type(e).__name__)
+                    configs[account]=self.registry.get(account)
                     self.repo.update_attempt(receipt.attempt_id,'ambiguous',data={'reason':'Launch acceptance uncertain','error_kind':type(e).__name__},now=now)
                     errors.append({'task':spec.id,'account':account,'kind':'ambiguous_launch'})
                 counts[account]+=1; active=self.repo.active(project_id); global_count+=1

@@ -16,6 +16,7 @@ class Policy:
         if not account.enabled: reasons.append('Account disabled')
         if account.health != 'healthy': reasons.append('Connection health is not verified healthy')
         if not account.capabilities.get('launch',{}).get('supported'): reasons.append('Launch unsupported')
+        if task.requirements.get('hard_write_scope') and not account.capabilities.get('hard_write_scope',{}).get('supported'):reasons.append('Required hard write-scope boundary is unsupported')
         if self.occupied.get(account.id,0) >= account.capacity: reasons.append('Account capacity occupied')
         if self.project_occupied >= self.settings['max_concurrent']: reasons.append('Project concurrency limit')
         if self.global_occupied >= self.settings['global_concurrent']: reasons.append('Global concurrency limit')

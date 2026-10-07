@@ -91,7 +91,7 @@ def dashboard_state(store, project_id: str, config: dict, now: float) -> dict:
     settings = settings if isinstance(settings, dict) else {}
     return {
         'schema_version': 2,
-        'project': {'id': project_id, 'name': project_id},
+        'project': {'id': project_id, 'name': _text(config.get('project'),160) or project_id},
         'summary': {'active_tasks': len(slots), 'incidents': len(incidents)},
         'accounts': accounts,
         'slots': slots,
