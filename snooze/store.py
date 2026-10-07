@@ -6,6 +6,14 @@ from pathlib import Path
 from snooze.transport import normalize_status
 
 
+class ClosingConnection(sqlite3.Connection):
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
+
 class Store:
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -19,7 +27,7 @@ class Store:
             ''')
 
     def connect(self):
-        return sqlite3.connect(self.path, timeout=10)
+        return sqlite3.connect(self.path, timeout=10, factory=ClosingConnection)
 
     def ingest_jobs(self, project_id: str, jobs: list[dict]) -> None:
         with self.connect() as c:
@@ -68,3 +76,26 @@ class Store:
                 workers.append(job)
             incidents = [dict(zip(('job', 'kind', 'message', 'at'), r)) for r in c.execute('SELECT job,kind,message,at FROM incidents WHERE project=? AND acked=0', (project_id,))]
         return {'project': project_id, 'workers': workers, 'incidents': incidents, 'settings': self.settings(project_id)}
+
+    def history_page(self, project, *, offset=0, limit=25, query=''):
+        if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=100 or not isinstance(query,str) or len(query)>200:
+            raise ValueError('Invalid history page')
+        # SQL selects just the requested page; do not materialize raw job payloads.
+        sources=['''SELECT 'legacy-task:'||id AS id,COALESCE(json_extract(data,'$.observed_at'),json_extract(data,'$.last_sent')) AS at,
+            lower(json_extract(data,'$.state')) AS kind,COALESCE(json_extract(data,'$.title'),json_extract(data,'$.name'),id) AS title,
+            'Recorded legacy task state; this is not independent artifact validation.' AS detail,id AS task_id,'legacy-import' AS source
+            FROM jobs WHERE project=? AND lower(json_extract(data,'$.state')) IN ('complete','completed','done','cancelled','canceled','failed')''']
+        params=[project]
+        with self.connect() as c:
+            if c.execute("SELECT 1 FROM sqlite_master WHERE name='events'").fetchone():
+                sources.append('''SELECT 'event:'||id,at,kind,COALESCE(task,kind),COALESCE(json_extract(data,'$.message'),kind),task,'snooze-event' FROM events WHERE project=?''')
+                params.append(project)
+            source=' UNION ALL '.join(sources)
+            where=' WHERE instr(lower(title),lower(?))>0 OR instr(lower(kind),lower(?))>0'
+            params += [query,query]
+            total=c.execute('SELECT COUNT(*) FROM ('+source+')'+where,params).fetchone()[0]
+            rows=c.execute('SELECT * FROM ('+source+')'+where+' ORDER BY at DESC,id DESC LIMIT ? OFFSET ?',params+[limit,offset]).fetchall()
+        from snooze.outbox import safe_payload
+        entries=[{'id':r[0],'at':r[1] if isinstance(r[1],(int,float)) else None,'kind':r[2],'title':str(r[3])[:160],
+                  'detail':safe_payload({'message':str(r[4])[:500]})['message'],'task_id':r[5],'source':r[6]} for r in rows]
+        return {'entries':entries,'total':total,'offset':offset,'limit':limit,'has_more':offset+len(entries)<total}
