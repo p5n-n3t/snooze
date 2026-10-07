@@ -29,6 +29,56 @@ SCHEMA = (
     'CREATE TABLE IF NOT EXISTS capability_snapshots(account TEXT, at REAL, data TEXT)',
 )
 
+# History imports are separate from scheduler events: imported payloads are reduced to
+# these scalar facts before they can reach durable storage. Version 2 is additive so
+# existing control-plane databases keep their schema and history unchanged.
+METRICS_SCHEMA = (
+    'CREATE TABLE IF NOT EXISTS history_imports(source_id TEXT PRIMARY KEY, cursor TEXT, updated_at REAL NOT NULL)',
+    '''CREATE TABLE IF NOT EXISTS history_facts(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_id TEXT NOT NULL,
+        source_event_id TEXT NOT NULL,
+        project TEXT NOT NULL,
+        at REAL NOT NULL,
+        kind TEXT NOT NULL,
+        task TEXT,
+        attempt TEXT,
+        session TEXT,
+        parent_session TEXT,
+        root_session TEXT,
+        request_id TEXT,
+        usage_group_id TEXT,
+        cumulative INTEGER NOT NULL DEFAULT 0,
+        account TEXT,
+        model TEXT,
+        effort TEXT,
+        status TEXT,
+        tool TEXT,
+        input_tokens INTEGER,
+        output_tokens INTEGER,
+        reasoning_tokens INTEGER,
+        cache_read_tokens INTEGER,
+        cache_write_tokens INTEGER,
+        observed_cost REAL,
+        estimated_cost REAL,
+        cost_currency TEXT,
+        observed_cost_source TEXT,
+        estimated_cost_source TEXT,
+        queue_latency REAL,
+        run_duration REAL,
+        validated INTEGER,
+        capacity INTEGER,
+        source_version TEXT,
+        UNIQUE(source_id, source_event_id)
+    )''',
+    'CREATE UNIQUE INDEX IF NOT EXISTS history_request_once ON history_facts(source_id,request_id) WHERE request_id IS NOT NULL',
+    'CREATE INDEX IF NOT EXISTS history_project_time ON history_facts(project,at)',
+    'CREATE INDEX IF NOT EXISTS history_session_time ON history_facts(session,at)',
+    'CREATE INDEX IF NOT EXISTS history_usage_group ON history_facts(source_id,usage_group_id,cumulative)',
+    'CREATE INDEX IF NOT EXISTS history_account_time ON history_facts(account,at)',
+    'INSERT OR IGNORE INTO schema_versions(version,at) VALUES(2,unixepoch())',
+)
+
 
 def migrate_state(path: Path, before_commit=None) -> MigrationReport:
     path = Path(path)
@@ -37,8 +87,12 @@ def migrate_state(path: Path, before_commit=None) -> MigrationReport:
     backup_path = None
     try:
         exists = connection.execute("SELECT 1 FROM sqlite_master WHERE name='schema_versions'").fetchone()
-        if exists and connection.execute('SELECT 1 FROM schema_versions WHERE version=1').fetchone():
-            return MigrationReport(False, 1, None)
+        if exists:
+            current = connection.execute('SELECT COALESCE(MAX(version),0) FROM schema_versions').fetchone()[0]
+        else:
+            current = 0
+        if current >= 2:
+            return MigrationReport(False, current, None)
         # sqlite backup handles WAL and concurrent observations consistently.
         backup_path = path.with_name(path.name + '.pre-v1-backup')
         if not backup_path.exists():
@@ -48,12 +102,16 @@ def migrate_state(path: Path, before_commit=None) -> MigrationReport:
             backup_path.chmod(0o600)
         connection.execute('PRAGMA journal_mode=WAL')
         connection.execute('BEGIN IMMEDIATE')
-        for statement in SCHEMA: connection.execute(statement)
+        if current < 1:
+            for statement in SCHEMA: connection.execute(statement)
+            connection.execute('INSERT OR IGNORE INTO schema_versions VALUES(1,unixepoch())')
+        if current < 2:
+            for statement in METRICS_SCHEMA: connection.execute(statement)
         if before_commit is not None: before_commit(connection)
-        connection.execute('INSERT OR IGNORE INTO schema_versions VALUES(1,unixepoch())')
         connection.commit()
         path.chmod(0o600)
-        return MigrationReport(True, 1, backup_path)
+        latest = connection.execute('SELECT MAX(version) FROM schema_versions').fetchone()[0]
+        return MigrationReport(True, latest, backup_path)
     except Exception:
         connection.rollback()
         raise
