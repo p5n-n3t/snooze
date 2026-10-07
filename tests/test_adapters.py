@@ -14,6 +14,20 @@ class RecordingTransport:
 
 
 class AdapterTests(unittest.TestCase):
+    def test_full_approved_packet_is_sent_and_hard_write_scope_is_unsupported(self):
+        class Transport(RecordingTransport):
+            def request(self,key,method,path,body=None):
+                self.calls.append((key,method,path,body))
+                if path=='/api/tasks':return {'task':{'id':'remote-task'}}
+                return {'id':'session-1','branchName':'ls/test'}
+        transport=Transport()
+        adapter=LightSprintAdapter({'mcp_key':'key','stack_id':'stack','launch_verified':True,'models':['small'],'efforts':['low']},transport)
+        task=TaskSpec('t','p',('record:17','path:src/assigned.py'),'inputs.json','a'*64,{'model':'small'},{'ids':['17'],'fields':['id']},'json-records',True)
+        adapter.launch(task,{'id':'a','generation':1,'instructions':'Edit only assigned data.'})
+        description=next(c[3]['description'] for c in transport.calls if c[1]=='PATCH')
+        for text in ('path:src/assigned.py','inputs.json','"output_contract"','"scope_keys"'):
+            self.assertIn(text,description)
+        self.assertFalse(adapter.capabilities()['hard_write_scope']['supported'])
     def test_unsupported_launch_rejected_before_network(self):
         transport = RecordingTransport()
         adapter = LightSprintAdapter({'id': 'a', 'mcp_key': 'key'}, transport)

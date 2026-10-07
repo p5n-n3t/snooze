@@ -32,10 +32,10 @@ class Runtime:
         self.transport = LightSprint(Path(config['config_path']))
         from snooze.artifacts import GitHubArtifacts
         credentials = CredentialStore(self.state / 'credentials.json')
-        self.registry = ProviderRegistry(self.repo, self.transport, GitHubArtifacts(credentials))
+        self.registry = ProviderRegistry(self.repo, self.transport, GitHubArtifacts(credentials),project_id=self.project)
         self.scheduler = Scheduler(self.repo, self.registry, ValidatorRegistry())
         self.control = Control(self.repo, self.registry, self.scheduler)
-        self.monitor = Monitor(self.store, observe or self.transport.observe)
+        self.monitor = Monitor(self.store, observe or self.observe_legacy)
         self.channels = NotificationChannels(config.get('notifications',{}), config.get('approved_commands',()), credentials=credentials)
         self.outbox = Outbox(self.repo, self.channels.deliver)
         self.lock = threading.Lock(); self.stopped = threading.Event()
@@ -53,8 +53,16 @@ class Runtime:
         servers = tomllib.loads(path.read_text()).get('mcp_servers',{})
         for key, value in servers.items():
             if value.get('url') != 'https://app.lightsprint.ai/mcp' or value.get('enabled') is False: continue
-            if self.registry.get(key): continue
-            self.registry.upsert_public_config(key, {'mcp_key':key,'label':key,'enabled':False}, trusted=True)
+            if self.registry.get(key):
+                self.registry.authorize(key,self.project,manage=False);continue
+            # Imported connections may observe, but cannot launch without explicit
+            # stack/model verification and project/budget approval.
+            self.registry.upsert_public_config(key, {'mcp_key':key,'label':key,'enabled':True}, trusted=True)
+
+    def observe_legacy(self,job):
+        account=self.registry.get(job.get('server_key')) if job.get('server_key') else None
+        if account and not account.get('enabled',True): return {'status':'disabled'}
+        return self.transport.observe(job)
 
     def import_queue(self):
         queue = self.config.get('queue')

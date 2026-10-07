@@ -159,13 +159,15 @@ class TaskRepository:
         with self.connection() as c: ids = [r['id'] for r in c.execute('SELECT id FROM attempts WHERE project=? AND released_at IS NULL', (project,))]
         return [self.attempt(id) for id in ids]
 
-    def update_attempt(self, id, state, *, session=None, data=None, now=None):
+    def update_attempt(self, id, state, *, session=None, data=None, now=None, expected_revision=None):
         allowed = {'reserved','starting','running','awaiting_output','validating','complete','failed','cancel_pending','cancelled','ambiguous','blocked'}
         if state not in allowed: raise ValueError('Invalid attempt state')
         when = time.time() if now is None else now
         with self.connection(True) as c:
             row = c.execute('SELECT * FROM attempts WHERE id=? AND released_at IS NULL', (id,)).fetchone()
             if not row: raise ValueError('No active attempt')
+            task=c.execute('SELECT revision FROM tasks WHERE id=?',(row['task'],)).fetchone()
+            if expected_revision is not None and task['revision']!=expected_revision:raise ValueError('Stale revision')
             merged = json.loads(row['data']); merged.update(data or {})
             c.execute('UPDATE attempts SET state=?,session=COALESCE(?,session),data=? WHERE id=?', (state, session, json.dumps(merged), id))
             c.execute('UPDATE tasks SET state=?,updated_at=?,revision=revision+1 WHERE id=?', (state, when, row['task']))
@@ -193,10 +195,12 @@ class TaskRepository:
         with self.connection() as c:
             return [{**dict(r), 'reference': json.loads(r['reference'])} for r in c.execute('SELECT * FROM artifacts WHERE attempt=? ORDER BY at', (attempt_id,))]
 
-    def transition(self, id, state, now=None):
+    def transition(self, id, state, now=None, *, expected_revision=None, require_inactive=False):
         if state not in {'draft','queued','held','retry_due','blocked','cancelled','complete','unresolved'}: raise ValueError('Invalid task state')
         with self.connection(True) as c:
             row = c.execute('SELECT * FROM tasks WHERE id=?', (id,)).fetchone()
             if not row: raise ValueError('Unknown task')
+            if expected_revision is not None and row['revision']!=expected_revision:raise ValueError('Stale revision')
+            if require_inactive and c.execute('SELECT 1 FROM attempts WHERE task=? AND released_at IS NULL',(id,)).fetchone():raise ValueError('Active ownership must be reconciled')
             c.execute('UPDATE tasks SET state=?,updated_at=?,revision=revision+1 WHERE id=?', (state, now or time.time(), id))
             self.event(c, row['project'], 'task_' + state, {}, id, now=now)

@@ -68,6 +68,7 @@ class Scheduler:
         return {'task':spec.id,'action':'validation_failed'}
 
     def _recover(self, attempt, adapter, status, settings, now):
+        if not self.registry.authorized(attempt['account'],attempt['project']):return 'account_scope_unverified'
         if settings['pause_dispatch'] or settings['emergency_stop']: return 'recovery_paused'
         data=attempt['data']; count=data.get('recovery_count',0)
         if now < data.get('recovery_due',0): return 'recovery_backoff'
@@ -124,9 +125,11 @@ class Scheduler:
                 except Exception as e:
                     self._cooldown(attempt['account'],settings,now,type(e).__name__)
                     errors.append({'task':attempt['task'],'account':attempt['account'],'kind':type(e).__name__})
-            active=self.repo.active(project_id); counts=Counter(a['account'] for a in active)
-            configs={a['id']:self.registry.get(a['id']) for a in self.registry.list_public()}
-            with self.repo.connection() as c: global_count=c.execute('SELECT COUNT(*) FROM attempts WHERE released_at IS NULL').fetchone()[0]
+            active=self.repo.active(project_id)
+            configs={a['id']:self.registry.get(a['id']) for a in self.registry.list_public(project_id)}
+            with self.repo.connection() as c:
+                global_count=c.execute('SELECT COUNT(*) FROM attempts WHERE released_at IS NULL').fetchone()[0]
+                counts=Counter({r['account']:r['occupied'] for r in c.execute('SELECT account,COUNT(*) AS occupied FROM attempts WHERE released_at IS NULL GROUP BY account')})
             for task in self.repo.list(project_id):
                 if only_task and task['id']!=only_task: continue
                 if task['state'] not in ('queued','retry_due') or task['due_at']>now: continue

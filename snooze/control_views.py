@@ -15,7 +15,7 @@ def extend_dashboard(state, control, project):
     managed = ownership is not None and ownership['executor'] == 'snooze'
     state['project']['executor'] = ownership['executor'] if ownership else 'external-managed'
     state['settings'] = settings
-    accounts = control.registry.list_public()
+    accounts = control.registry.list_public(project)
     state['accounts'] = accounts or state['accounts']
     state['capabilities'].update({
         name: {'supported': managed, 'reason': None if managed else 'This project is externally managed. Snooze cannot control its dispatcher.'}

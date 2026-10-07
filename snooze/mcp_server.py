@@ -20,7 +20,7 @@ class MCPFacade:
             from snooze.control_views import task_row
             result={'project':self.repo.project(project),'tasks':[task_row(t) for t in self.repo.list(project)[:100]]}
             if self.control:
-                result.update(settings=self.control.scheduler.settings(project),accounts=self.control.registry.list_public())
+                result.update(settings=self.control.scheduler.settings(project),accounts=self.control.registry.list_public(project))
             return result
         if tool=='events':return EventFeed(self.repo).read(project,arguments.get('after',0),arguments.get('limit',100))
         if tool=='incidents':return {'deliveries':self.outbox.list(project),'mode':'inbox-only'}

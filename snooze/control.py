@@ -40,6 +40,7 @@ class Control:
                 row=add_packet(self.repo,project_id,values,approved=False)
                 revision=row['revision']; self.scheduler.wake.set(); return receipt('confirmed')
             if action=='account-test':
+                if not self.registry.authorized(target_id,project_id):return receipt('rejected','Account is outside this project scope',403)
                 self.registry.test_connection(target_id)
                 revision=self.registry.get(target_id)['revision'];return receipt('confirmed')
             if action in ('policy-config','dispatch-pause','emergency-stop'):
@@ -51,8 +52,9 @@ class Control:
                 revision=updated['revision']; return receipt('confirmed')
             if action=='account-config':
                 account=self.registry.get(target_id); revision=account['revision'] if account else 0
+                if account and not self.registry.authorized(target_id,project_id,manage=True):return receipt('rejected','Account is not manageable in this project',403)
                 if expected_revision!=revision: raise ValueError('Stale revision')
-                updated=self.registry.upsert_public_config(target_id,values,expected_revision=expected_revision)
+                updated=self.registry.upsert_public_config(target_id,values,expected_revision=expected_revision,project_id=project_id)
                 revision=updated['revision']; return receipt('confirmed')
             task=self.repo.get(target_id)
             if not task or task['project']!=project_id: return receipt('rejected','Unknown task in this project',404)
@@ -66,16 +68,18 @@ class Control:
                 if settings['pause_dispatch'] and values.get('override_pause') is not True: return receipt('rejected','Dispatch paused; explicit one-off override required.',409)
                 if active: return receipt('rejected','Current attempt owns its scope. Reconcile inactivity/cancellation first.',409)
                 if not task['spec']['approved']: return receipt('rejected','Task is not approved.',409)
-                self.repo.transition(target_id,'queued')
+                self.repo.transition(target_id,'queued',expected_revision=expected_revision,require_inactive=True)
                 report=self.scheduler.tick(project_id,manual=True,override_pause=values.get('override_pause') is True,only_task=target_id)
                 launched=any(d.get('action')=='launched' for d in report.decisions)
                 revision=self.repo.get(target_id)['revision']
                 return receipt('pending' if launched else 'rejected',None if launched else 'No eligible route; inspect scheduling decisions.',202 if launched else 409)
             if action=='cancel':
                 if owner!='snooze' or not active: return receipt('rejected','No Snooze-owned active session to cancel.',409)
+                if active['state']=='cancel_pending':return receipt('rejected','Cancellation is already pending; scope remains owned.',409)
+                if not self.registry.authorized(active['account'],project_id):return receipt('rejected','Attempt account is outside this project scope',403)
                 adapter=self.registry.adapter(active['account'])
                 if not adapter.capabilities().get('cancel',{}).get('supported'): return receipt('rejected','Cancellation unsupported by this adapter.',409)
-                self.repo.update_attempt(active['id'],'cancel_pending',data={'actor':actor_id})
+                self.repo.update_attempt(active['id'],'cancel_pending',data={'actor':actor_id,'action_id':action_id},expected_revision=expected_revision)
                 adapter.cancel(active['session']); revision=self.repo.get(target_id)['revision']
                 return receipt('pending','Awaiting provider acknowledgment; scope remains owned.',202)
             if action not in ('hold','approve','prioritize'): raise ValueError('Unknown action')

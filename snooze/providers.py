@@ -13,21 +13,38 @@ ADAPTERS = {'lightsprint','local','native','ssh','tailscale','ollama','v0','figm
 
 
 class ProviderRegistry:
-    def __init__(self, repository, transport=None, collector=None):
+    def __init__(self, repository, transport=None, collector=None, project_id=None):
         self.repo = repository
         self.transport = transport
         self.collector = collector
+        self.project_id = project_id
         self.overrides = {}
+        with self.repo.connection(True) as c:
+            c.execute('CREATE TABLE IF NOT EXISTS provider_projects(account TEXT,project TEXT,can_manage INTEGER DEFAULT 0,PRIMARY KEY(account,project))')
+
+    def authorize(self,account,project,*,manage=False):
+        if not self.get(account) or not self.repo.project(project):raise ValueError('Unknown account/project')
+        with self.repo.connection(True) as c:
+            c.execute('INSERT INTO provider_projects VALUES(?,?,?) ON CONFLICT(account,project) DO UPDATE SET can_manage=MAX(can_manage,excluded.can_manage)',(account,project,int(manage)))
+            self.repo.event(c,project,'account_authorized',{'account':account,'can_manage':manage})
+
+    def authorized(self,account,project,*,manage=False):
+        with self.repo.connection() as c:
+            row=c.execute('SELECT can_manage FROM provider_projects WHERE account=? AND project=?',(account,project)).fetchone()
+        return bool(row and (not manage or row['can_manage']))
 
     def get(self, id):
         with self.repo.connection() as c:
             row = c.execute('SELECT * FROM provider_configs WHERE id=?', (id,)).fetchone()
             return {**json.loads(row['data']), 'revision': row['revision']} if row else None
 
-    def upsert_public_config(self, account_id, values, *, trusted=False, expected_revision=None):
+    def upsert_public_config(self, account_id, values, *, trusted=False, expected_revision=None, project_id=None):
         if not isinstance(values, dict) or set(values) - (PUBLIC_FIELDS | (BACKEND_FIELDS if trusted else {'mcp_key','workspace_id'})):
             raise ValueError('Unknown/private configuration fields')
-        current = self.get(account_id) or {'id': account_id, 'label': account_id, 'adapter': 'lightsprint', 'enabled': True, 'capacity': 12, 'models': [], 'efforts': ['low'], 'reserve': 0, 'health': 'unknown'}
+        existing=self.get(account_id)
+        project_id=project_id or self.project_id
+        if existing and project_id and not trusted and not self.authorized(account_id,project_id,manage=True):raise PermissionError('Account is not manageable in this project')
+        current = existing or {'id': account_id, 'label': account_id, 'adapter': 'lightsprint', 'enabled': True, 'capacity': 12, 'models': [], 'efforts': ['low'], 'reserve': 0, 'health': 'unknown'}
         original_revision = current.get('revision',0)
         if expected_revision is not None and expected_revision != original_revision: raise ValueError('Stale revision')
         current.update(values)
@@ -56,6 +73,8 @@ class ProviderRegistry:
             row=c.execute('SELECT revision FROM provider_configs WHERE id=?',(account_id,)).fetchone()
             if (row['revision'] if row else 0) != original_revision: raise ValueError('Stale revision')
             c.execute('INSERT INTO provider_configs(id,data,revision) VALUES(?,?,1) ON CONFLICT(id) DO UPDATE SET data=excluded.data,revision=revision+1', (account_id,json.dumps(current)))
+            if project_id and not existing:
+                c.execute('INSERT OR IGNORE INTO provider_projects VALUES(?,?,1)',(account_id,project_id))
             self.repo.event(c, 'system', 'account_configured', {'account':account_id})
         return self.public(self.get(account_id))
 
@@ -69,8 +88,10 @@ class ProviderRegistry:
     def public(self, config):
         return {**{k:config.get(k) for k in PUBLIC_FIELDS}, 'id':config['id'], 'server_key':config['id'], 'revision':config.get('revision',0), 'identity':None, 'quota':self.snapshot(config['id']).quota, 'health':config.get('health','unknown'), 'capabilities':self.adapter(config['id']).capabilities()}
 
-    def list_public(self):
-        with self.repo.connection() as c: ids = [r['id'] for r in c.execute('SELECT id FROM provider_configs ORDER BY id')]
+    def list_public(self,project=None):
+        project=project or self.project_id
+        with self.repo.connection() as c:
+            ids = [r['id'] for r in (c.execute('SELECT id FROM provider_configs WHERE id IN (SELECT account FROM provider_projects WHERE project=?) ORDER BY id',(project,)) if project else c.execute('SELECT id FROM provider_configs ORDER BY id'))]
         return [self.public(self.get(id)) for id in ids]
 
     def snapshot(self, id, now=None):

@@ -89,6 +89,12 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
                     from snooze.control_views import extend_dashboard
                     state = extend_dashboard(state, control, project)
                 return self.send(state)
+            if path=='/api/v2/history/events':
+                if not authorized_read(self.headers,host,token):return self.send({'error':'Private read authentication required'},403)
+                try:
+                    query=parse_qs(urlparse(self.path).query)
+                    return self.send(store.history_page(project,offset=int(query.get('offset',['0'])[0]),limit=int(query.get('limit',['25'])[0]),query=query.get('q',[''])[0]))
+                except ValueError:return self.send({'error':'Invalid history page'},400)
             if path in ('/api/v2/providers', '/api/v2/queue', '/api/v2/events','/api/v2/inbox'):
                 if not authorized_read(self.headers, host, token):
                     return self.send({'error': 'Private read authentication required'}, 403)
@@ -97,7 +103,7 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
                 try:
                     query = parse_qs(urlparse(self.path).query)
                     if path == '/api/v2/providers':
-                        return self.send({'accounts': control.registry.list_public()})
+                        return self.send({'accounts': control.registry.list_public(project)})
                     if path == '/api/v2/inbox':
                         from snooze.outbox import Outbox
                         return self.send({'deliveries':Outbox(control.repo).list(project)[-200:],

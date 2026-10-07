@@ -28,7 +28,7 @@ class SchedulerTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.repo=TaskRepository(Path(self.tmp.name)/'s.sqlite'); self.repo.register_project('p','/p')
         self.registry=ProviderRegistry(self.repo)
-        self.registry.upsert_public_config('a',{'adapter':'ssh','models':['small'],'efforts':['low'],'capacity':1,'health':'healthy','allow_unknown_quota':True},trusted=True)
+        self.registry.upsert_public_config('a',{'adapter':'ssh','models':['small'],'efforts':['low'],'capacity':1,'health':'healthy','allow_unknown_quota':True},trusted=True,project_id='p')
         self.adapter=FakeAdapter(); self.registry.overrides['a']=self.adapter
         self.scheduler=Scheduler(self.repo,self.registry,ValidatorRegistry(),clock=lambda:100)
         self.scheduler.configure('p',{'pause_dispatch':False,'allow_unknown_quota':True})
@@ -95,13 +95,23 @@ class SchedulerTests(unittest.TestCase):
 
     def test_broken_account_cools_down_without_blocking_healthy_work(self):
         self.registry.upsert_public_config('a',{'capacity':4})
-        self.registry.upsert_public_config('b',{'adapter':'ssh','models':['small'],'efforts':['low'],'capacity':2,'health':'healthy','allow_unknown_quota':True},trusted=True)
+        self.registry.upsert_public_config('b',{'adapter':'ssh','models':['small'],'efforts':['low'],'capacity':2,'health':'healthy','allow_unknown_quota':True},trusted=True,project_id='p')
         healthy=FakeAdapter();self.registry.overrides['b']=healthy
         self.adapter.timeout=True;self.add('first','1');self.add('second','2');self.add('third','3')
         self.scheduler.tick('p',100)
         self.assertEqual(len(self.adapter.launches),1)
         self.assertEqual(len(healthy.launches),2)
         self.assertGreater(self.registry.get('a')['cooldown_until'],100)
+
+    def test_other_project_occupancy_does_not_hide_a_free_healthy_route(self):
+        self.registry.upsert_public_config('b',{'adapter':'ssh','models':['small'],'efforts':['low'],'capacity':1,'health':'healthy','allow_unknown_quota':True},trusted=True,project_id='p')
+        healthy=FakeAdapter();self.registry.overrides['b']=healthy
+        self.repo.register_project('q','/q')
+        self.repo.add(TaskSpec('other','q',('record:9',),'ref','h',{'model':'small'},{'ids':['9'],'fields':['id']},'json-records',True))
+        self.repo.reserve('other','a',('record:9',),100)
+        self.add();self.scheduler.tick('p',100)
+        self.assertEqual(self.adapter.launches,[])
+        self.assertEqual(len(healthy.launches),1)
     def test_recoveries_have_persisted_backoff_and_stop_after_two(self):
         self.add(); self.scheduler.tick('p',100); self.adapter.state='failed'
         self.scheduler.tick('p',101); self.scheduler.tick('p',102)

@@ -1,5 +1,7 @@
 """Documented LightSprint operations. Ambiguous launches are never retried here."""
 import re
+import json
+from dataclasses import asdict
 from snooze.adapters.base import BaseAdapter, OPERATIONS, UnsupportedOperation
 from snooze.transport import normalize_status
 
@@ -17,6 +19,7 @@ class LightSprintAdapter(BaseAdapter):
 
     def capabilities(self):
         result = super().capabilities()
+        result['hard_write_scope'] = {'supported':False,'reason':'LightSprint supplies a stack-wide sandbox. Instructions and isolated PR branches are not a hard per-file write boundary; require manual diff review before applying output.'}
         if self.config.get('mcp_key'):
             result['observe'] = {'supported': True, 'reason': None}
         for op in self.config.get('verified_operations', []):
@@ -43,7 +46,8 @@ class LightSprintAdapter(BaseAdapter):
         created = self.transport.request(key, 'POST', '/api/tasks', {'title': 'Snooze ' + task.id, 'scope': 'stack', 'stackId': identifier(self.config['stack_id'])})
         provider_id = identifier(created.get('task', {}).get('id'))
         # Task creation is durable; record the remote ID for any later ambiguity.
-        instructions=attempt.get('instructions','')
+        instructions=attempt.get('instructions','')+'\n\nApproved Snooze task packet (do not broaden this assignment):\n'+json.dumps(asdict(task),ensure_ascii=False,indent=2)
+        instructions+='\nWrite only the named repository-relative paths/record IDs on your isolated task branch; never merge, deploy, change canonical data or edit another stack repository. The coordinator must review the diff before applying changes. Input must match the supplied hash and output must satisfy the supplied exact contract. If details are insufficient, save an explicit blocker instead of guessing.'
         if self.config.get('artifact_prefix'):
             instructions+='\n\nSnooze output receipt: save '+self.config['artifact_prefix']+'/'+task.id+'.json on your pushed task branch. JSON envelope must contain task_id='+task.id+', attempt_id='+attempt['id']+', generation='+str(attempt['generation'])+' and records matching the supplied exact output contract. Do not fabricate completion; push the saved file.'
         self.transport.request(key, 'PATCH', '/api/tasks/' + provider_id, {'description': instructions, 'complexity': 'low'})
