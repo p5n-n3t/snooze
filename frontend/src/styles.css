@@ -299,6 +299,48 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .ownership-callout strong { color: var(--text-primary); font-size: 11px; }.ownership-callout p { margin: 5px 0 0; color: var(--text-muted); font-size: 10px; line-height: 1.5; }
 .settings-disabled-controls { display: flex; gap: 8px; }.settings-disabled-controls button { padding: 7px 10px; }
 
+/* Revisioned coordinator controls */
+.control-receipt { position: sticky; top: 0; z-index: 4; margin: 0; padding: 10px 24px; border-bottom: 1px solid var(--border-default); color: var(--text-primary); background: var(--bg-surface); font-size: 10px; line-height: 1.45; }
+.control-receipt:has(+ *) { box-shadow: 0 4px 14px color-mix(in srgb, var(--bg-primary) 25%, transparent); }
+.provider-actions { display: flex; justify-content: flex-end; margin: -5px 0 13px; }
+.provider-fields .provider-field { min-width: 0; padding: 9px; border: 1px solid var(--border-muted); border-radius: 6px; background: var(--bg-inset); }
+.provider-field strong { overflow-wrap: anywhere; color: var(--text-secondary); font-size: 10px; font-weight: 550; }
+.credential-unknown { color: var(--text-muted); }.credential-dot-unknown { background: var(--text-muted); }
+.provider-card-footer button:disabled { opacity: .55; cursor: not-allowed; }
+.capability-reason { margin: 10px 0 0; color: var(--text-muted); font-size: 9px; line-height: 1.45; }
+.account-editor, .task-draft-form { margin: 13px 0; padding: 16px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-inset); }
+.account-editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.account-editor-heading .eyebrow { margin: 0 0 4px; font-size: 8px; }.account-editor-heading h2, .account-editor-heading h3 { margin: 0; color: var(--text-primary); font-size: 14px; font-weight: 620; }
+.account-form-grid, .policy-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px 14px; }
+.account-form-grid label, .policy-form-grid label { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--text-secondary); font-size: 10px; }
+.account-form-grid .kit-text-input { width: 100%; }
+.account-form-grid input:not([type="checkbox"]), .account-form-grid select, .policy-form-grid input, .policy-form-grid select, .policy-form-grid textarea, .coordinator-register input, .task-draft-form input, .task-draft-form select, .task-draft-form textarea, .policy-preset select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 32px; padding: 7px 9px; border: 1px solid var(--border-default); border-radius: 5px; color: var(--text-primary); background: var(--bg-surface); font: inherit; }
+.account-form-grid textarea, .policy-form-grid textarea, .task-draft-form textarea { min-height: 70px; resize: vertical; }
+.account-form-grid .checkbox-field, .policy-toggles .checkbox-field { display: flex; flex-direction: row; align-items: center; gap: 8px; min-height: 31px; }
+.checkbox-field input { accent-color: var(--accent-cyan); }
+.form-help { margin: 11px 0; color: var(--text-muted); font-size: 9px; line-height: 1.55; }
+.account-editor-footer { display: flex; justify-content: flex-end; margin-top: 11px; }
+.text-button { padding: 4px 8px; border: 0; color: var(--text-muted); background: transparent; font: inherit; cursor: pointer; }
+.policy-preset { display: grid; grid-template-columns: minmax(120px, .4fr) minmax(150px, .7fr) 1fr; align-items: center; gap: 12px; color: var(--text-secondary); font-size: 10px; }
+.policy-preset > span { color: var(--text-muted); font-size: 9px; }
+.policy-toggles { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 13px 0; border-bottom: 1px solid var(--border-muted); color: var(--text-secondary); font-size: 10px; }
+.native-policy { margin-top: 12px; }
+.policy-warning { margin: 0; padding: 10px 12px; border-left: 2px solid var(--accent-amber); color: var(--text-muted); background: color-mix(in srgb, var(--accent-amber) 5%, var(--bg-surface)); font-size: 9px; line-height: 1.5; }
+.settings-disabled-controls button.emergency { border-color: color-mix(in srgb, var(--accent-red) 35%, var(--border-default)); color: var(--accent-red); }
+.capability-reason { margin-top: 9px; }
+.queue-actions-wrap { flex-wrap: wrap; }
+.queue-actions-wrap .kit-button, .queue-actions-wrap .unsupported-action { min-height: 26px; }
+.task-draft-form { margin: 0 0 14px; background: var(--bg-surface); }
+.task-draft-form h2 { margin: 0; color: var(--text-primary); font-size: 14px; }
+.draft-instructions { grid-column: 1 / -1; }
+.mobile-task-list { display: none; }
+.mobile-task-card { display: flex; flex-direction: column; gap: 7px; padding: 12px; border: 1px solid var(--border-muted); border-radius: 7px; background: var(--bg-inset); }
+.mobile-task-card > strong { color: var(--text-primary); font-size: 11px; }.mobile-task-card > small { color: var(--text-muted); font-size: 9px; overflow-wrap: anywhere; }.task-ownership-note { color: var(--accent-amber) !important; }
+.delivery-inbox { margin: 25px 0; padding: 17px 18px 12px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-surface); }
+.inbox-only-notice { margin: 0 0 12px; padding: 10px 12px; border-left: 2px solid var(--accent-amber); color: var(--text-muted); background: color-mix(in srgb, var(--accent-amber) 5%, var(--bg-surface)); font-size: 9px; line-height: 1.5; }
+.coordinator-register { display: grid; grid-template-columns: auto minmax(150px, 1fr) auto; align-items: center; gap: 9px; margin: 12px 0; color: var(--text-muted); font-size: 9px; }
+.coordinator-register .kit-button { white-space: nowrap; }.delivery-row { border-top: 1px solid var(--border-muted); }.delivery-row .incident-copy { grid-template-columns: minmax(0, 1fr); }.delivery-row .incident-copy small { grid-column: auto; }.ack-state { color: var(--accent-green); font-size: 9px; }.inbox-quiet { padding: 12px; }.delivery-inbox > .footnote { margin-bottom: 0; }
+
 /* Upstream drawer content */
 .kit-detail-drawer__header { min-height: 72px; padding: 12px 18px; border-color: var(--border-default); background: var(--bg-surface); }
 .drawer-heading { width: 100%; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -345,11 +387,12 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   .incident-inbox { padding: 13px 12px 9px; }.incident-row { grid-template-columns: 20px minmax(0,1fr); gap: 8px; padding: 8px 0; }.incident-row > .kit-button { grid-column: 2; justify-self: start; }.incident-copy { grid-template-columns: minmax(0,1fr); gap: 3px; }.incident-copy > span { white-space: normal; }.incident-copy small { grid-column: auto; }
   .roster-table { display: none; }.mobile-worker-list { display: grid; gap: 8px; padding: 9px; }.mobile-worker-card { display: flex; flex-direction: column; gap: 6px; padding: 11px; border: 1px solid var(--border-muted); border-radius: 7px; background: var(--bg-inset); }.mobile-worker-top, .mobile-worker-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.mobile-worker-card > strong { color: var(--text-primary); font-size: 11px; font-weight: 600; }.mobile-worker-card > small, .mobile-worker-bottom > span { color: var(--text-muted); font-size: 9px; }.mobile-worker-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 9px; margin: 3px 0; }.mobile-worker-facts span { display: flex; flex-direction: column; gap: 2px; color: var(--text-muted); font-size: 9px; }.mobile-worker-facts b { color: var(--text-secondary); font-size: 10px; font-weight: 550; }
   .queue-toolbar { grid-template-columns: 1fr; }.queue-toolbar > :last-child { width: 100%; }.queue-results-bar { font-size: 9px; }.queue-results-bar > span:last-child { max-width: 45%; text-align: right; }
-  .queue-table { display: none; }.queue-table-frame { min-height: 120px; }.mobile-assignment-list { display: grid; gap: 8px; padding: 8px; }.mobile-assignment-card { padding: 11px; border: 1px solid var(--border-muted); border-radius: 7px; background: var(--bg-inset); }.mobile-assignment-card > strong { display: block; margin-bottom: 4px; font-size: 11px; }.mobile-assignment-card > small { color: var(--text-muted); }.mobile-assignment-meta { display: flex; justify-content: space-between; gap: 8px; margin: 9px 0; color: var(--text-muted); font-size: 9px; }.mobile-assignment-card .queue-actions { justify-content: flex-end; }
+  .queue-table { display: none; }.queue-table-frame { min-height: 120px; }.mobile-task-list { display: grid; gap: 8px; padding: 8px; }.mobile-task-card .queue-actions { justify-content: flex-start; }
   .empty-table { inset: 0; padding-top: 20px; }
   .provider-summary { display: none; }.provider-card { padding: 13px; }.provider-fields { grid-template-columns: 1fr 1fr; gap: 12px; }.provider-card-footer { align-items: flex-start; flex-direction: column; }.provider-card-footer > div { width: 100%; }.provider-card-footer button { flex: 1; }
   .history-toolbar { align-items: flex-start; flex-direction: column; gap: 7px; }.history-toolbar > :first-child { max-width: none; width: 100%; }.history-table .kit-table { min-width: 620px; }
   .settings-frame { min-height: 500px; }.settings-frame .kit-settings { flex-direction: column; min-height: 500px; }.settings-frame .kit-settings__sidebar { width: 100%; gap: 10px; padding: 14px 10px 8px; border-right: 0; border-bottom: 1px solid var(--border-muted); }.settings-frame .kit-settings__nav { flex-direction: row; overflow-x: auto; }.settings-frame .kit-settings__group-title, .settings-frame .kit-settings__title { display: none; }.settings-frame .kit-settings__nav-item { min-width: max-content; padding: 8px; }.settings-frame .kit-settings__nav-summary { display: none; }.settings-frame .kit-settings__panel { padding: 19px 16px; }.settings-group { align-items: flex-start; flex-direction: column; gap: 12px; }.interval-control { width: 100%; flex-wrap: wrap; }.interval-control input { flex: 1; }.settings-readonly > span { text-align: left; }
+  .account-editor, .task-draft-form { padding: 12px; }.account-form-grid, .policy-form-grid { grid-template-columns: 1fr; }.draft-instructions { grid-column: auto; }.policy-preset { grid-template-columns: 1fr; gap: 6px; }.policy-toggles { flex-direction: column; gap: 8px; }.coordinator-register { grid-template-columns: 1fr; }.delivery-inbox { padding: 13px 12px 9px; }.control-receipt { padding: 9px 16px; font-size: 9px; }
   .kit-detail-drawer { left: 0 !important; right: 0 !important; width: 100vw !important; max-width: 100vw !important; }.drawer-content { padding: 14px 15px 20px; }.kit-detail-drawer__footer { align-items: flex-start; }.drawer-footer-note { max-width: 210px; line-height: 1.45; }
 }
 

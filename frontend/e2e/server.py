@@ -56,6 +56,36 @@ class FixtureStore:
     def snapshot(self, project_id: str) -> dict:
         return {"project": project_id, "workers": self.workers, "incidents": self.incidents, "settings": dict(self.settings)}
 
+    def history_page(self, project_id: str, *, offset: int = 0, limit: int = 25, query: str = "") -> dict:
+        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100 or len(query) > 200:
+            raise ValueError("Invalid history page")
+        terminal = {"complete", "completed", "done", "cancelled", "canceled", "failed"}
+        needle = query.casefold()
+        rows = []
+        for worker in self.workers:
+            state = str(worker.get("state", "")).lower()
+            if state not in terminal:
+                continue
+            task_id = str(worker.get("id", ""))
+            title = str(worker.get("title") or worker.get("name") or task_id)[:160]
+            detail = "Recorded task state from local Snooze history; usage and validation detail are unavailable."
+            if needle and needle not in " ".join((title, state, detail, task_id)).casefold():
+                continue
+            rows.append({"id": f"task:{task_id}", "at": worker.get("observed_at") or worker.get("last_sent"), "kind": state,
+                         "title": title, "detail": detail, "task_id": task_id})
+        for index, incident in enumerate(self.incidents):
+            task_id = str(incident.get("job", ""))
+            kind = str(incident.get("kind", "incident"))
+            title = task_id or "Worker event"
+            detail = str(incident.get("message") or "No event detail was recorded.")[:500]
+            if needle and needle not in " ".join((title, kind, detail, task_id)).casefold():
+                continue
+            rows.append({"id": f"incident:{index}", "at": incident.get("at"), "kind": kind, "title": title, "detail": detail, "task_id": task_id or None})
+        rows.sort(key=lambda row: row.get("at") or 0, reverse=True)
+        total = len(rows)
+        entries = rows[offset:offset + limit]
+        return {"entries": entries, "total": total, "offset": offset, "limit": limit, "has_more": offset + len(entries) < total}
+
     def set_settings(self, project_id: str, values: dict) -> None:
         self.settings = dict(values)
 

@@ -7,9 +7,11 @@
   import History from "./components/History.svelte";
   import Settings from "./components/Settings.svelte";
   import TaskDrawer from "./components/TaskDrawer.svelte";
-  import { getDashboardState, getHistory, getTaskDetail, postLegacy } from "./lib/api";
+  import { getDashboardState, getHistory, getInbox, getQueue, getTaskDetail, getProviders, postControl, postLegacy } from "./lib/api";
+  import type { ControlReceipt } from "./lib/api";
   import { LiveQuery } from "./lib/liveQuery.svelte";
-  import type { DashboardState, HistoryEntry, PageKey, Slot, TaskDetail } from "./lib/types";
+  import { SettledPoller } from "./lib/settledPoller";
+  import type { DashboardState, HistoryEntry, InboxPage, PageKey, QueueTask, TaskDetail } from "./lib/types";
 
   let dashboard = $state<DashboardState | null>(null);
   let page = $state<PageKey>("watch");
@@ -20,14 +22,33 @@
   let loadError = $state("");
   let notice = $state("");
   let historyEntries = $state<HistoryEntry[]>([]);
+  let historyTotal = $state(0);
+  let historyOffset = $state(0);
+  const historyLimit = 25;
+  let historyQuery = $state("");
   let historyLoading = $state(false);
   let historyError = $state("");
   let historyLoaded = $state(false);
+  let historyRequestId = 0;
+  let historyAbort: AbortController | null = null;
+  let queueTasks = $state<QueueTask[]>([]);
+  let queueTotal = $state(0);
+  let queueOffset = $state(0);
+  const queueLimit = 50;
+  let queueLoading = $state(false);
+  let queueError = $state("");
+  let queueRequestId = 0;
+  let queueAbort: AbortController | null = null;
+  let inbox = $state<InboxPage | null>(null);
+  let inboxError = $state("");
+  let controlSaving = $state(false);
+  let controlNotice = $state("");
   let drawerOpen = $state(false);
   let drawerLoading = $state(false);
   let drawerError = $state("");
   let taskDetail = $state<TaskDetail | null>(null);
   let selectedTaskId = $state<string | null>(null);
+  let statePoller: SettledPoller<DashboardState> | null = null;
   const query = new LiveQuery();
 
   const selectedSlot = $derived(dashboard?.slots.find((slot) => slot.task_id === selectedTaskId) ?? null);
@@ -38,48 +59,81 @@
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem("snooze-theme", next); } catch { /* Storage may be disabled in private contexts. */ }
   }
-
   function toggleTheme() { applyTheme(theme === "dark" ? "light" : "dark"); }
 
-  async function refreshState() {
-    const generation = query.begin(performance.now());
-    const start = performance.now();
-    const step = query.start("dashboard state", start);
-    if (!dashboard) loading = true;
+  function refreshHistory(offset = historyOffset, nextQuery = historyQuery) {
+    const requestId = ++historyRequestId;
+    historyAbort?.abort();
+    const controller = new AbortController();
+    historyAbort = controller;
+    historyLoading = true;
+    historyError = "";
+    void getHistory({ offset, limit: historyLimit, query: nextQuery }, (path, init) => fetch(path, { ...init, signal: controller.signal }))
+      .then((result) => {
+        if (requestId !== historyRequestId) return;
+        historyEntries = result.entries;
+        historyTotal = result.total;
+        historyOffset = result.offset;
+        historyQuery = nextQuery;
+        historyLoaded = true;
+      })
+      .catch((error: unknown) => {
+        if (requestId !== historyRequestId || controller.signal.aborted) return;
+        historyError = error instanceof Error ? error.message : "The history request failed.";
+      })
+      .finally(() => {
+        if (requestId !== historyRequestId) return;
+        historyLoading = false;
+        historyAbort = null;
+      });
+  }
+
+  function refreshQueue(offset = queueOffset): Promise<void> {
+    const requestId = ++queueRequestId;
+    queueAbort?.abort();
+    const controller = new AbortController();
+    queueAbort = controller;
+    queueLoading = true;
+    queueError = "";
+    return getQueue(offset, queueLimit, (path, init) => fetch(path, { ...init, signal: controller.signal }))
+      .then((result) => {
+        if (requestId !== queueRequestId) return;
+        queueTasks = result.tasks;
+        queueTotal = result.total;
+        queueOffset = result.offset;
+      })
+      .catch((error: unknown) => {
+        if (requestId !== queueRequestId || controller.signal.aborted) return;
+        queueError = error instanceof Error ? error.message : "The queue request failed.";
+      })
+      .finally(() => {
+        if (requestId !== queueRequestId) return;
+        queueLoading = false;
+        queueAbort = null;
+      });
+  }
+
+  async function refreshProviders() {
     try {
-      const next = await getDashboardState();
-      if (!query.isCurrent(generation)) return;
-      dashboard = next;
-      loadError = "";
-      query.settle(step, { name: "dashboard state", startMs: 0, durationMs: performance.now() - start });
+      const result = await getProviders();
+      if (dashboard) dashboard = { ...dashboard, accounts: result.accounts };
     } catch (error) {
-      if (!query.isCurrent(generation)) return;
-      const message = error instanceof Error ? error.message : "The state request failed.";
-      loadError = dashboard ? message : `Snooze could not load the worker state. ${message}`;
-      query.abandon(step);
-    } finally {
-      query.end(generation);
-      if (query.isCurrent(generation)) loading = false;
+      controlNotice = error instanceof Error ? `Provider list refresh failed: ${error.message}` : "Provider list refresh failed.";
     }
   }
 
-  async function refreshHistory() {
-    historyLoading = true;
-    try {
-      historyEntries = await getHistory();
-      historyError = "";
-      historyLoaded = true;
-    } catch (error) {
-      historyError = error instanceof Error ? error.message : "The history request failed.";
-    } finally {
-      historyLoading = false;
-    }
+  async function refreshInbox() {
+    try { inbox = await getInbox(); inboxError = ""; }
+    catch (error) { inboxError = error instanceof Error ? error.message : "The delivery inbox request failed."; }
   }
 
   function navigate(next: PageKey) {
     page = next;
     window.scrollTo(0, 0);
-    if (next === "history" && !historyLoaded) void refreshHistory();
+    if (next === "history" && !historyLoaded) refreshHistory(0, "");
+    if (next === "queue" && !queueTasks.length) refreshQueue(0);
+    if (next === "providers") void refreshProviders();
+    if (next === "watch") void refreshInbox();
   }
 
   async function inspect(taskId: string) {
@@ -88,13 +142,9 @@
     drawerError = "";
     drawerLoading = true;
     drawerOpen = true;
-    try {
-      taskDetail = await getTaskDetail(taskId);
-    } catch (error) {
-      drawerError = error instanceof Error ? error.message : "The task request failed.";
-    } finally {
-      drawerLoading = false;
-    }
+    try { taskDetail = await getTaskDetail(taskId); }
+    catch (error) { drawerError = error instanceof Error ? error.message : "The task request failed."; }
+    finally { drawerLoading = false; }
   }
 
   function closeDrawer() {
@@ -110,12 +160,9 @@
     try {
       await postLegacy("/api/check", {});
       notice = "Check accepted by the local service. Watch will update when the next cycle is reported.";
-      await refreshState();
-    } catch (error) {
-      notice = error instanceof Error ? error.message : "The check request failed.";
-    } finally {
-      checking = false;
-    }
+      await statePoller?.refresh();
+    } catch (error) { notice = error instanceof Error ? error.message : "The check request failed."; }
+    finally { checking = false; }
   }
 
   async function acknowledge(taskId: string | null, kind: string | null) {
@@ -123,12 +170,10 @@
     notice = "";
     try {
       await postLegacy("/api/ack", { job: taskId, kind });
-      notice = "Acknowledgement recorded by the local service.";
-      await refreshState();
-      if (historyLoaded) await refreshHistory();
-    } catch (error) {
-      notice = error instanceof Error ? error.message : "The acknowledgement was not recorded.";
-    }
+      notice = "Legacy local acknowledgement recorded. Durable delivery acknowledgment and resolution are separate.";
+      await statePoller?.refresh();
+      if (historyLoaded) refreshHistory(historyOffset, historyQuery);
+    } catch (error) { notice = error instanceof Error ? error.message : "The acknowledgement was not recorded."; }
   }
 
   async function saveInterval(interval: number) {
@@ -137,13 +182,39 @@
     try {
       await postLegacy("/api/settings", { interval });
       notice = "Check interval saved by the local service.";
-      await refreshState();
-    } catch (error) {
-      notice = error instanceof Error ? error.message : "The setting was not saved.";
-    } finally {
-      saving = false;
-    }
+      await statePoller?.refresh();
+    } catch (error) { notice = error instanceof Error ? error.message : "The setting was not saved."; }
+    finally { saving = false; }
   }
+
+  async function control(action: string, target: string, values: Record<string, unknown>, revision: number): Promise<ControlReceipt | null> {
+    if (!dashboard) return null;
+    controlSaving = true;
+    controlNotice = `Submitting ${action}; waiting for the coordinator receipt…`;
+    try {
+      const receipt = await postControl({ action, target_id: target, values, expected_revision: revision });
+      const state = receipt.state === "confirmed" ? "Confirmed" : receipt.state === "pending" ? "Pending" : "Rejected";
+      controlNotice = `${state} · ${action} · HTTP ${receipt.status_code}${receipt.reason ? ` · ${receipt.reason}` : ""} · receipt ${receipt.action_id || "not reported"}`;
+      if (receipt.state !== "rejected") {
+        await statePoller?.refresh();
+        if (page === "queue" || ["task-add", "hold", "approve", "prioritize", "retry", "resume", "cancel"].includes(action)) await refreshQueue(queueOffset);
+        if (page === "providers" || ["account-config", "account-test"].includes(action)) await refreshProviders();
+        if (page === "watch" || ["incident-ack", "coordinator-register"].includes(action)) await refreshInbox();
+      }
+      return receipt;
+    } catch (error) {
+      controlNotice = error instanceof Error
+        ? `No receipt received · ${action} · ${error.message}. Reconcile state before repeating.`
+        : `No receipt received · ${action}. Reconcile state before repeating.`;
+      return null;
+    } finally { controlSaving = false; }
+  }
+
+  function savePolicy(values: Record<string, unknown>, revision: number) {
+    return control("policy-config", dashboard?.project.id ?? "", values, revision);
+  }
+  function navigateHistory(offset: number) { refreshHistory(offset, historyQuery); }
+  function searchHistory(value: string) { refreshHistory(0, value); }
 
   onMount(() => {
     try {
@@ -151,28 +222,52 @@
       if (saved === "dark" || saved === "light") applyTheme(saved);
       else applyTheme("dark");
     } catch { applyTheme("dark"); }
-    void refreshState();
-    const timer = window.setInterval(() => void refreshState(), 10_000);
-    return () => window.clearInterval(timer);
+    statePoller = new SettledPoller<DashboardState>(
+      async (signal) => {
+        const generation = query.begin(performance.now());
+        const started = performance.now();
+        const step = query.start("dashboard state", started);
+        if (!dashboard) loading = true;
+        try {
+          const next = await getDashboardState(signal);
+          if (query.isCurrent(generation)) query.settle(step, { name: "dashboard state", startMs: 0, durationMs: performance.now() - started });
+          return next;
+        } catch (error) { query.abandon(step); throw error; }
+        finally { query.end(generation); }
+      },
+      (next) => { dashboard = next; loadError = ""; loading = false; },
+      (error) => { loadError = dashboard ? error.message : `Snooze could not load the worker state. ${error.message}`; loading = false; },
+      { intervalMs: 10_000, timeoutMs: 8_000, maxBackoffMs: 120_000 },
+    );
+    statePoller.start();
+    void refreshInbox();
+    return () => {
+      statePoller?.stop();
+      historyAbort?.abort();
+      queueAbort?.abort();
+    };
   });
 </script>
 
 <Shell active={page} projectName={dashboard?.project.name ?? "Snooze project"} {connectionLabel} {theme} onnav={navigate} ontoggleTheme={toggleTheme}>
   {#if dashboard}
     {#if loadError}<p class="stale-banner global-stale" role="status">Refresh failed: {loadError}. The last received state is still shown.</p>{/if}
+    {#if controlNotice}<p class="control-receipt" role="status" data-testid="control-receipt">{controlNotice}</p>{/if}
     {#if page === "watch"}
-      <Watch {dashboard} loading={checking} {notice} oninspect={inspect} oncheck={checkNow} onack={acknowledge} />
+      <Watch {dashboard} loading={checking} {notice} {inbox} {inboxError} oninspect={inspect} oncheck={checkNow} onack={acknowledge}
+        onregister={(coordinatorId) => void control("coordinator-register", dashboard?.project.id ?? "", { coordinator_id: coordinatorId }, dashboard?.settings.revision ?? 0)}
+        onincidentack={(deliveryId, coordinatorId) => void control("incident-ack", deliveryId, { coordinator_id: coordinatorId }, dashboard?.settings.revision ?? 0)} />
     {:else if page === "queue"}
-      <Queue {dashboard} oninspect={inspect} />
+      <Queue {dashboard} tasks={queueTasks} total={queueTotal} offset={queueOffset} limit={queueLimit} loading={queueLoading || controlSaving} error={queueError} onpage={refreshQueue} oninspect={inspect} oncontrol={control} />
     {:else if page === "providers"}
-      <Providers {dashboard} />
+      <Providers {dashboard} oncontrol={control} />
     {:else if page === "history"}
-      <History entries={historyEntries} loading={historyLoading} error={historyError} oninspect={inspect} />
+      <History entries={historyEntries} total={historyTotal} offset={historyOffset} limit={historyLimit} query={historyQuery} loading={historyLoading} error={historyError} oninspect={inspect} onpage={navigateHistory} onsearch={searchHistory} />
     {:else}
-      <Settings {dashboard} {saving} {notice} onsave={saveInterval} />
+      <Settings {dashboard} saving={saving || controlSaving} {notice} onsave={saveInterval} onpolicy={savePolicy} oncontrol={control} />
     {/if}
   {:else}
-    <section class="startup-state" role="status"><div class="startup-mark">S</div><p class="eyebrow">LOCAL WORKER CONTROL</p><h1>Connecting to Snooze</h1><p>{loadError || "Loading the latest worker state…"}</p><button type="button" class="retry-button" onclick={() => void refreshState()}>Try again</button></section>
+    <section class="startup-state" role="status"><div class="startup-mark">S</div><p class="eyebrow">LOCAL WORKER CONTROL</p><h1>Connecting to Snooze</h1><p>{loadError || "Loading the latest worker state…"}</p><button type="button" class="retry-button" onclick={() => void statePoller?.refresh()}>Try again</button></section>
   {/if}
 </Shell>
 
