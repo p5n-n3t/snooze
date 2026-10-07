@@ -1,8 +1,7 @@
-import type { HistoryFilters } from "../../lib/history-types";
+import { HISTORY_FILTER_VALUE_LIMIT, assertHistoryFilterCardinality, type HistoryFilters } from "../../lib/history-types";
 
 const STORAGE_KEY = "snooze.history.filters.v1";
 const URL_KEYS = ["from_utc", "to_utc", "timezone", "accounts", "models", "efforts"] as const;
-const MAX_FILTER_VALUES = 24;
 const MAX_FILTER_VALUE_LENGTH = 160;
 const MAX_RANGE_DAYS = 366;
 
@@ -26,7 +25,7 @@ function cleanValues(value: unknown): string[] {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter((item) => item.length > 0 && item.length <= MAX_FILTER_VALUE_LENGTH && !/[\u0000-\u001f\u007f]/.test(item)))
-  ].slice(0, MAX_FILTER_VALUES);
+  ].slice(0, HISTORY_FILTER_VALUE_LIMIT);
 }
 
 export function timezoneDate(instant: string, timezone: string): string {
@@ -155,6 +154,7 @@ export function validateHistoryFilters(filters: HistoryFilters): { ok: true } | 
 }
 
 function writeParams(params: URLSearchParams, filters: HistoryFilters): void {
+  assertHistoryFilterCardinality(filters);
   for (const key of URL_KEYS) params.delete(key);
   params.set("from_utc", filters.fromUtc);
   params.set("to_utc", filters.toUtc);

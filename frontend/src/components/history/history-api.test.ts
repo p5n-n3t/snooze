@@ -17,6 +17,21 @@ describe("History API", () => {
     expect(csv.searchParams.getAll("accounts")).toEqual(["acct a", "acct/b"]);
   });
 
+  it("serializes up to 20 values per facet and refuses requests that exceed the API contract", () => {
+    const values = Array.from({ length: 20 }, (_, index) => `choice-${index}`);
+    const atLimit = { ...filters, accounts: values, models: values, efforts: values };
+    const query = historyQuery(atLimit);
+    expect(query.getAll("accounts")).toHaveLength(20);
+    expect(query.getAll("models")).toHaveLength(20);
+    expect(query.getAll("efforts")).toHaveLength(20);
+
+    for (const key of ["accounts", "models", "efforts"] as const) {
+      const overLimit = Array.from({ length: 21 }, (_, index) => `choice-${index}`);
+      expect(() => historyQuery({ ...filters, [key]: overLimit })).toThrow(/20 values/);
+      expect(() => historyExportUrl("csv", { ...filters, [key]: overLimit })).toThrow(/20 values/);
+    }
+  });
+
   it("requests the native report and optional engine with credentials and cancellation", async () => {
     const controller = new AbortController();
     const reportFetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ native: {}, filters: {}, bounded_rows: 10000 }), { status: 200 }));

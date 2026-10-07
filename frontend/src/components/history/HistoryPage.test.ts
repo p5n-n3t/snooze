@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getEngineReport, getHistoryReport } from "../../lib/history-api";
 import HistoryPage from "./HistoryPage.svelte";
 import { makeHistoryResponse } from "./history-fixtures";
+import type { HistoryFilters, HistoryReportResponse } from "../../lib/history-types";
 
 vi.mock("../../lib/history-api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/history-api")>();
@@ -16,6 +17,33 @@ function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
+}
+
+function withFacets(facets: { accounts: string[]; models: string[]; efforts: string[] }, projectId = "current-snooze"): HistoryReportResponse {
+  const base = makeHistoryResponse();
+  const account = base.native.breakdowns.accounts[0]!;
+  const model = base.native.breakdowns.models[0]!;
+  return {
+    ...base,
+    filters: { ...base.filters, project_id: projectId },
+    native: {
+      ...base.native,
+      breakdowns: {
+        ...base.native.breakdowns,
+        accounts: facets.accounts.map((id) => ({ ...account, id })),
+        models: facets.models.map((id) => ({ ...model, id })),
+        requested_models: [],
+        confirmed_models: [],
+        efforts: facets.efforts.map((id) => ({ id, event_count: 1 })),
+      },
+    },
+  };
+}
+
+async function openFilter(label: string) {
+  const summary = Array.from(document.querySelectorAll("summary")).find((item) => item.textContent?.includes(label));
+  if (!summary) throw new Error(`Could not find the ${label} filter summary`);
+  await fireEvent.click(summary);
 }
 
 describe("HistoryPage", () => {
@@ -74,6 +102,108 @@ describe("HistoryPage", () => {
     await new Promise((resolve) => setTimeout(resolve, 350));
     expect(mockedHistory).toHaveBeenCalledTimes(2);
     expect(mockedHistory.mock.calls[1]?.[0].toUtc).toBe("2026-10-11T00:00:00.000Z");
+  });
+
+  it.each([
+    { key: "accounts", label: "Account", values: ["account-a", "account-b"] },
+    { key: "models", label: "Model", values: ["model-a", "model-b"] },
+    { key: "efforts", label: "Effort", values: ["effort-a", "effort-b"] },
+  ] as const)("keeps the complete $label choice domain after a narrowed response", async ({ key, label, values }) => {
+    const complete = { accounts: ["account-a", "account-b"], models: ["model-a", "model-b"], efforts: ["effort-a", "effort-b"] };
+    mockedHistory.mockImplementation(async (requestFilters: HistoryFilters) => {
+      const responseFacets = { ...complete, [key]: requestFilters[key].length ? requestFilters[key] : complete[key] };
+      return withFacets(responseFacets);
+    });
+
+    render(HistoryPage);
+    await screen.findByText("current-snooze");
+    await openFilter(label);
+    await fireEvent.click(screen.getByLabelText(values[0]!));
+    await waitFor(() => expect(mockedHistory).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    await screen.findByLabelText(values[1]!);
+
+    await fireEvent.click(screen.getByLabelText(values[1]!));
+    await waitFor(() => expect(mockedHistory).toHaveBeenCalledTimes(3), { timeout: 2000 });
+    expect(mockedHistory.mock.calls[2]?.[0][key]).toEqual(values);
+  });
+
+  it("rebuilds the unfiltered facet domain when the date context changes", async () => {
+    mockedHistory.mockImplementation(async (requestFilters: HistoryFilters) => {
+      const changedContext = requestFilters.toUtc > "2026-10-08T00:00:00.000Z";
+      const domainAccounts = changedContext ? ["account-c", "account-d"] : ["account-a", "account-b"];
+      return withFacets({
+        accounts: requestFilters.accounts.length ? requestFilters.accounts : domainAccounts,
+        models: ["model-a"],
+        efforts: ["effort-a"],
+      });
+    });
+
+    render(HistoryPage);
+    await screen.findByText("current-snooze");
+    await openFilter("Account");
+    await fireEvent.click(screen.getByLabelText("account-a"));
+    await waitFor(() => expect(mockedHistory).toHaveBeenCalledTimes(2), { timeout: 2000 });
+
+    await fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-10-09" } });
+    await waitFor(() => expect(mockedHistory).toHaveBeenCalledTimes(4), { timeout: 2500 });
+    expect(mockedHistory.mock.calls[2]?.[0].toUtc).toBe("2026-10-10T00:00:00.000Z");
+    expect(mockedHistory.mock.calls[3]?.[0]).toMatchObject({ accounts: [], models: [], efforts: [] });
+    await screen.findByLabelText("account-c");
+    expect(screen.queryByLabelText("account-b")).toBeNull();
+    expect((screen.getByLabelText("account-a") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("discards a prior project's choices when the report changes project scope", async () => {
+    let requestCount = 0;
+    mockedHistory.mockImplementation(async (requestFilters: HistoryFilters) => {
+      requestCount += 1;
+      const projectId = requestCount === 1 ? "project-one" : "project-two";
+      const accounts = requestFilters.accounts.length
+        ? requestFilters.accounts
+        : requestCount === 1 ? ["account-a", "account-b"] : ["account-c", "account-d"];
+      return withFacets({ accounts, models: ["model-a"], efforts: ["effort-a"] }, projectId);
+    });
+
+    render(HistoryPage);
+    await screen.findByText("project-one");
+    await openFilter("Account");
+    await fireEvent.click(screen.getByLabelText("account-a"));
+    await waitFor(() => expect(mockedHistory).toHaveBeenCalledTimes(3), { timeout: 2500 });
+    expect(mockedHistory.mock.calls[2]?.[0]).toMatchObject({ accounts: [], models: [], efforts: [] });
+    await screen.findByLabelText("account-c");
+    expect(screen.queryByLabelText("account-b")).toBeNull();
+    expect((screen.getByLabelText("account-a") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("discloses when a truncated unfiltered report can provide only partial facet choices", async () => {
+    const truncated = withFacets({ accounts: ["account-a"], models: ["model-a"], efforts: ["effort-a"] });
+    truncated.native.coverage.truncated = true;
+    mockedHistory.mockResolvedValue(truncated);
+
+    render(HistoryPage);
+    await screen.findByText("current-snooze");
+    expect(screen.getByText(/Filter choices may be incomplete/)).toBeTruthy();
+  });
+
+  it("does not allow selecting a 21st facet value when 20 came from a shared URL", async () => {
+    const params = new URLSearchParams(window.location.search);
+    for (let index = 0; index < 20; index += 1) params.append("accounts", `account-${index}`);
+    window.history.replaceState(null, "", `/history?${params.toString()}`);
+    mockedHistory.mockResolvedValue(withFacets({
+      accounts: Array.from({ length: 21 }, (_, index) => `account-${index}`),
+      models: [], efforts: [],
+    }));
+
+    render(HistoryPage);
+    await screen.findByText("current-snooze");
+    expect(mockedHistory.mock.calls[0]?.[0].accounts).toHaveLength(20);
+    await waitFor(() => expect(mockedHistory).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    expect(mockedHistory.mock.calls[1]?.[0]).toMatchObject({ accounts: [], models: [], efforts: [], fromUtc: mockedHistory.mock.calls[0]?.[0].fromUtc, toUtc: mockedHistory.mock.calls[0]?.[0].toUtc, timezone: "UTC" });
+    await openFilter("Account");
+    const twentyFirst = screen.getByLabelText("account-20") as HTMLInputElement;
+    expect(twentyFirst.disabled).toBe(true);
+    await fireEvent.click(twentyFirst);
+    expect(mockedHistory).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a stale response visible while filters refresh and ignores a late cancelled result", async () => {

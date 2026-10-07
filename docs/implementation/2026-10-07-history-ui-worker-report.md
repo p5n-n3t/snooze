@@ -33,3 +33,22 @@ No screenshot was captured: the stack sandbox configuration had no preview servi
 ## Remaining integration boundary
 
 The report, engine and export endpoints were not present in this checkout when the frontend was validated, so the API client was checked against the binding brief and native analytics DTO rather than against a live HTTP server. The coordinator owns endpoint implementation and App integration. A rendered screenshot and an end-to-end request against those routes remain for that integration step.
+
+## Fresh scoped review repair report (2026-10-07)
+
+Fetched coordinator HEAD `eaf4db9` and merged it into this task branch at `9511865` to refresh the History producer and contract. The merge was clean; the frontend repair below changes only the History worker-owned components, API/types helpers, tests and this report.
+
+Repaired both Important facet findings from `docs/implementation/2026-10-07-history-ui-repair-brief.md`:
+
+1. Account, model and effort choices now use an unfiltered, same-project/date/timezone report domain when the active report is narrowed. That request uses the existing bounded report endpoint; the domain resets on date/timezone changes and project ID changes. Previously selected values remain visible, and the filter bar warns when an unfiltered report is loading or its bounded source rows are truncated. Component regressions first failed because selecting A removed B for all three dimensions, then passed with A and B both selectable.
+2. The frontend now shares the API's 20-value limit. URL and local-storage restoration cap each facet at 20, the filter UI disables additional unchecked choices at 20, and query/export/share serialization rejects an oversized state before sending or writing it. Regressions cover 20 accepted, 21 restored/capped, 21 blocked in the UI, and 21 rejected by serializers.
+
+Verification after the repairs:
+
+- Focused History regressions: `npm test -- --run src/components/history/HistoryPage.test.ts src/components/history/history-state.test.ts src/components/history/history-api.test.ts` — 3 files and 21 tests passed. Before the fix, the targeted History component regressions were RED: B was absent after selecting A for account/model/effort, and the 21st choice was enabled.
+- `npm test` — 9 files and 28 tests passed.
+- `npm run check` — passed with zero errors and warnings.
+- `npm run build` — passed; Vite transformed 199 modules and package asset generation completed. No tracked build artifacts changed.
+- `git diff --check` — passed.
+
+No screenshot was captured for this repair: the component remains outside App integration, and the repair brief assigns the final browser proof to the root integration owner. No App, global CSS, assets, Python, database, deployment, or other-repository changes were made.
