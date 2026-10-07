@@ -2,6 +2,7 @@ import json
 import tempfile
 import time
 import unittest
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -138,11 +139,14 @@ class AnalyticsTests(unittest.TestCase):
         self.event('p1', 'attempt_reserved', 100, {'account': 'acct'}, 't1', 'a1')
         HistoryIngestor(self.repo).ingest_events('engine', 'capacity', [
             {'event_id': 'capacity-1', 'at': 120, 'kind': 'capacity_snapshot', 'project_id': 'p1',
-             'account': 'acct', 'capacity': 2}])
+             'account': 'acct', 'capacity': 2, 'source_version': 'engine-v1'}])
         report = self.analytics.history_report(self.filters())
         self.assertEqual(report['summary']['historical_utilization']['value'], 0.5)
         self.assertEqual(report['summary']['historical_utilization']['state'], 'partial')
         self.assertIsNone(report['summary']['historical_utilization']['coverage']['eligible'])
+        capacity_source = next(source for source in report['sources'] if source['id'] == 'engine')
+        self.assertEqual(capacity_source['version'], 'engine-v1')
+        self.assertEqual(capacity_source['window'], {'from': 120.0, 'to': 120.0})
 
     def test_mixed_cost_currencies_remain_separate(self):
         HistoryIngestor(self.repo).ingest_events('agentsview', 'currency-page', [
@@ -212,6 +216,51 @@ class AnalyticsTests(unittest.TestCase):
         self.assertIsNone(report['summary']['input_tokens']['coverage']['eligible'])
         self.assertEqual(report['summary']['input_tokens']['state'], 'partial')
         self.assertEqual(report['coverage']['usage']['state'], 'partial')
+
+    def test_anonymous_cumulative_usage_keeps_distinct_source_events_separate(self):
+        HistoryIngestor(self.repo).ingest_events('agentsview', 'anonymous-page', [
+            {'event_id': 'anonymous-1', 'at': 100, 'kind': 'usage', 'project_id': 'p1',
+             'cumulative': True, 'input_tokens': 5},
+            {'event_id': 'anonymous-2', 'at': 101, 'kind': 'usage', 'project_id': 'p1',
+             'cumulative': True, 'input_tokens': 10},
+        ])
+
+        report = self.analytics.history_report(self.filters())
+
+        self.assertEqual(report['summary']['input_tokens']['value'], 15)
+        self.assertEqual(report['summary']['input_tokens']['coverage']['observed'], 2)
+
+    def test_source_metadata_uses_only_bounded_history_facts(self):
+        rows = [
+            {'event_id': f'bounded-{index}', 'at': 100 + index, 'kind': 'usage', 'project_id': 'p1',
+             'source_version': 'v1', 'request_id': f'request-{index}', 'input_tokens': 1,
+             'observed_cost': 0.1, 'estimated_cost': 0.2, 'cost_currency': 'USD',
+             'observed_cost_source': 'provider_reported', 'estimated_cost_source': 'catalog_estimate'}
+            for index in range(100)
+        ]
+        HistoryIngestor(self.repo).ingest_events('large-source', 'page-100', rows)
+        statements = []
+        original_connection = self.repo.connection
+
+        @contextmanager
+        def tracing_connection(write=False):
+            with original_connection(write) as connection:
+                connection.set_trace_callback(statements.append)
+                yield connection
+
+        self.repo.connection = tracing_connection
+        report = Analytics(self.repo, max_rows=2).history_report(self.filters())
+
+        fact_selects = [statement.casefold() for statement in statements if 'from history_facts' in statement.casefold()]
+        self.assertTrue(fact_selects)
+        self.assertTrue(all('limit' in statement for statement in fact_selects), fact_selects)
+        self.assertTrue(report['coverage']['truncated'])
+        self.assertEqual(report['sources'], [{
+            'id': 'large-source', 'version': 'v1',
+            'window': {'from': 100.0, 'to': 101.0}, 'facts': 2,
+            'observed_cost_sources': ['provider_reported'],
+            'estimated_cost_sources': ['catalog_estimate'],
+        }])
 
     def test_scale_fixture_reports_measured_query_time(self):
         now = time.time()

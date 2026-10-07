@@ -239,7 +239,8 @@ class Analytics:
                 capacity_parameters.extend(filters.accounts)
             if filters.session_id:
                 capacities_clauses.append('session=?'); capacity_parameters.append(filters.session_id)
-            capacities = connection.execute('SELECT account,at,capacity FROM history_facts WHERE ' +
+            capacities = connection.execute('SELECT account,at,capacity,source_id,source_version,'
+                                             'observed_cost_source,estimated_cost_source FROM history_facts WHERE ' +
                                              ' AND '.join(capacities_clauses) + ' ORDER BY at,id LIMIT ?',
                                              (*capacity_parameters, self.max_rows + 1)).fetchall()
             capacities_truncated = len(capacities) > self.max_rows
@@ -319,6 +320,10 @@ class Analytics:
         for fact in facts:
             if fact['cumulative']:
                 stable = fact['usage_group_id'] or fact['root_session'] or fact['parent_session'] or fact['session']
+                # If the source gives no relationship identity, a cumulative
+                # row is its own observation; grouping anonymous rows would
+                # silently replace unrelated usage with their maximum.
+                stable = stable or fact['source_event_id']
                 key = (fact['source_id'], 'cumulative', stable)
             else:
                 key = (fact['source_id'], 'request', fact['request_id'] or fact['source_event_id'])
@@ -730,7 +735,7 @@ class Analytics:
             'truncated': truncated,
             'truncation': dict(truncation),
         }
-        source_metadata = self._source_metadata(filters, selected_projects)
+        source_metadata = self._source_metadata([*facts, *capacities])
         if 'Snooze event log' in sources:
             source_metadata.insert(0, {'id': 'snooze-events', 'version': None,
                                        'window': {'from': min((event['at'] for event in events), default=None),
@@ -759,31 +764,31 @@ class Analytics:
             'query_ms': round(max(0.0, (self.clock() - started) * 1000), 3),
         }
 
-    def _source_metadata(self, filters, selected_projects):
-        clauses = []
-        args = []
-        if selected_projects:
-            clauses.append('project IN (' + ','.join('?' for _ in selected_projects) + ')'); args.extend(selected_projects)
-        if filters.start is not None: clauses.append('at>=?'); args.append(filters.start)
-        if filters.end is not None: clauses.append('at<?'); args.append(filters.end)
-        if filters.session_id:
-            clauses.append('session=?'); args.append(filters.session_id)
-        for field, values in (('account', filters.accounts), ('model', filters.models), ('effort', filters.efforts)):
-            if values:
-                clauses.append(field + ' IN (' + ','.join('?' for _ in values) + ')')
-                args.extend(values)
-        where = ' WHERE ' + ' AND '.join(clauses) if clauses else ''
-        with self.repository.connection() as connection:
-            rows = connection.execute('''SELECT source_id,source_version,MIN(at) AS from_at,MAX(at) AS to_at,
-                COUNT(*) AS facts,GROUP_CONCAT(DISTINCT observed_cost_source) AS observed_cost_sources,
-                GROUP_CONCAT(DISTINCT estimated_cost_source) AS estimated_cost_sources
-                FROM history_facts''' + where +
-                ' GROUP BY source_id,source_version ORDER BY source_id,source_version', args).fetchall()
-        return [{'id': row['source_id'], 'version': row['source_version'],
-                 'window': {'from': row['from_at'], 'to': row['to_at']}, 'facts': row['facts'],
-                 'observed_cost_sources': row['observed_cost_sources'].split(',') if row['observed_cost_sources'] else [],
-                 'estimated_cost_sources': row['estimated_cost_sources'].split(',') if row['estimated_cost_sources'] else []}
-                for row in rows]
+    @staticmethod
+    def _source_metadata(facts):
+        """Summarize provenance from the already bounded and filtered fact rows."""
+        grouped = {}
+        for fact in facts:
+            key = (fact['source_id'], fact['source_version'])
+            row = grouped.setdefault(key, {
+                'id': fact['source_id'], 'version': fact['source_version'],
+                'window': {'from': fact['at'], 'to': fact['at']}, 'facts': 0,
+                'observed_cost_sources': set(), 'estimated_cost_sources': set(),
+            })
+            row['facts'] += 1
+            row['window']['from'] = min(row['window']['from'], fact['at'])
+            row['window']['to'] = max(row['window']['to'], fact['at'])
+            if fact['observed_cost_source']:
+                row['observed_cost_sources'].add(fact['observed_cost_source'])
+            if fact['estimated_cost_source']:
+                row['estimated_cost_sources'].add(fact['estimated_cost_source'])
+        result = []
+        for key in sorted(grouped, key=lambda item: (item[0], item[1] or '')):
+            row = grouped[key]
+            row['observed_cost_sources'] = sorted(row['observed_cost_sources'])
+            row['estimated_cost_sources'] = sorted(row['estimated_cost_sources'])
+            result.append(row)
+        return result
 
 
 def history_report(repository, filters):

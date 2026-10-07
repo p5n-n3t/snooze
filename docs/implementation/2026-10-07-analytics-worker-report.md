@@ -25,3 +25,20 @@ The optional client follows the pinned AgentsView OpenAPI at commit `f4eacbc6111
 Snooze-side metrics describe persisted local events and imported normalized facts, not a complete provider universe. Imported usage and capacity do not have independently enumerated eligible-session/snapshot totals, so their coverage is partial. Historical utilization uses observed timestamped capacity snapshots only; idle time remains unavailable without complete ownership-window evidence. External account/effort filters and multi-value project/model filters fail closed when the AgentsView endpoint cannot apply them. A live project-scoped read, an import loop, and UI/API integration are outside this worker's ownership and remain for the coordinating work.
 
 The changes are local and tested. Commit, push and the requested pull request are tracked separately from this report so PR creation can wait for the user decision.
+
+## Fresh review repair report (2026-10-07)
+
+Refreshed the branch against `origin/codex/snooze-command-centre` at `aed214946b69377a6d3f98df1056a61f97bcb9e3` by merging that target; no conflicts occurred. The merge commit is `ab54445`.
+
+Repaired both Important findings from `docs/implementation/2026-10-07-analytics-repair-brief.md`:
+
+1. Anonymous cumulative usage now falls back to its required stable source event ID when no usage-group/session relationship is available, so independent observations add while related snapshots and forks keep their existing deduplication identity. A regression with two anonymous cumulative rows (5 and 10 input tokens) first failed at 10, then passed at 15.
+2. Source metadata is now grouped from the already bounded usage, tool-call, and capacity rows. Each source version, observed window, included-row count, and cost provenance reflects those included rows; existing fact and capacity truncation flags disclose when they are only a subset. A 100-row fixture with `max_rows=2` confirmed the report metadata covers the first two included facts and that every `history_facts` SELECT in the report path has a `LIMIT`. The prior regression exposed the uncapped grouped metadata query; it passes after the fix. Capacity snapshot version/window metadata is also retained.
+
+Validation after repair and target merge:
+
+- `python3 -m unittest tests.test_analytics tests.test_history_ingest tests.test_analytics_engine tests.test_migrations -v` — 42 tests passed.
+- `python3 -m unittest discover -v` — 141 tests passed, including coordinator and scheduler regressions.
+- The focused and full suites pass with the two new review regressions and capacity provenance assertion.
+
+The repair changes only `snooze/analytics.py`, `tests/test_analytics.py`, `docs/ANALYTICS.md`, and this report, in addition to the required merge of the latest coordinator target. Draft PR creation was approved in the follow-up request and will be completed after pushing these repairs.
