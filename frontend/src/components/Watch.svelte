@@ -10,17 +10,22 @@
   import Button from "../lib/kit/components/Button.svelte";
   import StatusDot from "../lib/kit/components/StatusDot.svelte";
   import { display, formatElapsed, formatTimestamp, statusTone } from "../lib/format";
-  import type { DashboardState, Slot } from "../lib/types";
+  import type { DashboardState, InboxPage, Slot } from "../lib/types";
 
   interface Props {
     dashboard: DashboardState;
     loading: boolean;
     notice: string;
+    inbox?: InboxPage | null;
+    inboxError?: string;
     oninspect: (taskId: string) => void;
     oncheck: () => void;
     onack: (taskId: string | null, kind: string | null) => void;
+    onregister?: (coordinatorId: string) => void;
+    onincidentack?: (deliveryId: string, coordinatorId: string) => void;
   }
-  let { dashboard, loading, notice, oninspect, oncheck, onack }: Props = $props();
+  let { dashboard, loading, notice, inbox = null, inboxError = "", oninspect, oncheck, onack, onregister = () => undefined, onincidentack = () => undefined }: Props = $props();
+  let coordinatorId = $state("snooze-local-ui");
 
   const groups = $derived.by(() => {
     const byAccount = new Map<string, Slot[]>();
@@ -87,6 +92,24 @@
       {#if dashboard.incidents.length > 8}<p class="muted footnote">Showing the 8 most recent of {dashboard.incidents.length} incidents. Open History to page through the full record.</p>{/if}
     </section>
   {/if}
+
+  <section class="delivery-inbox" aria-labelledby="delivery-title" data-testid="delivery-inbox">
+    <div class="section-heading incident-heading"><div><p class="eyebrow">DURABLE DELIVERY RECEIPTS</p><h2 id="delivery-title">Coordinator inbox</h2></div><span class="inbox-live">{inbox?.deliveries.length ?? 0} receipts</span></div>
+    {#if inboxError}<p class="stale-banner" role="status">Delivery inbox unavailable. {inboxError}</p>{/if}
+    {#if inbox?.wake_mode === "inbox-only"}<p class="inbox-only-notice">Inbox only: no coordinator wake channel is configured. A stored delivery does not wake an arbitrary ChatGPT window. {inbox.reason}</p>{/if}
+    <div class="coordinator-register"><label for="coordinator-id">Local coordinator ID</label><input id="coordinator-id" bind:value={coordinatorId} /><Button size="sm" disabled={!coordinatorId.trim()} onclick={() => onregister(coordinatorId.trim())}>Register coordinator</Button></div>
+    {#if inbox?.deliveries.length}
+      <div class="incident-list">
+        {#each inbox.deliveries as delivery (delivery.id)}
+          <article class="incident-row delivery-row">
+            <div class="incident-copy"><strong>{String(delivery.payload.kind ?? delivery.state)}</strong><span>{String(delivery.payload.message ?? "No delivery message was recorded.")}</span><small class="mono">{delivery.id} · {delivery.state}{delivery.resolved ? " · resolved" : " · unresolved"}</small></div>
+            {#if delivery.acknowledged_at}<span class="ack-state">Acknowledged</span>{:else}<Button size="sm" onclick={() => onincidentack(delivery.id, coordinatorId.trim())} disabled={!coordinatorId.trim()}>Acknowledge delivery</Button>{/if}
+          </article>
+        {/each}
+      </div>
+    {:else if !inboxError}<div class="quiet-state inbox-quiet"><div><strong>No durable delivery receipts</strong><p>Incident acknowledgment and resolution are separate records.</p></div></div>{/if}
+    <p class="muted footnote">Acknowledgment records receipt only; it does not resolve the incident or claim that a remote worker changed state.</p>
+  </section>
 
   <section class="roster" aria-labelledby="roster-title">
     <div class="section-heading"><div><p class="eyebrow">OCCUPIED CAPACITY</p><h2 id="roster-title">Active roster</h2></div><span class="roster-context">Reservations grouped by configured account</span></div>

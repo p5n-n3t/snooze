@@ -1,4 +1,4 @@
-import type { DashboardState, HistoryEntry, TaskDetail } from "./types";
+import type { DashboardState, HistoryPage, InboxPage, QueuePage, TaskDetail } from "./types";
 
 export interface ControlRequest {
   action: string;
@@ -8,9 +8,11 @@ export interface ControlRequest {
 }
 
 export interface ControlReceipt {
-  status: "accepted" | "rejected" | "pending" | "confirmed" | string;
-  message?: string;
-  [key: string]: unknown;
+  action_id: string;
+  state: "confirmed" | "pending" | "rejected" | string;
+  reason: string | null;
+  revision: number;
+  status_code: number;
 }
 
 type Fetcher = typeof fetch;
@@ -32,8 +34,8 @@ async function jsonRequest<T>(path: string, init?: RequestInit, fetcher: Fetcher
   return payload as T;
 }
 
-export function getDashboardState(fetcher?: Fetcher): Promise<DashboardState> {
-  return jsonRequest<DashboardState>("/api/v2/state", undefined, fetcher);
+export function getDashboardState(signal?: AbortSignal, fetcher: Fetcher = fetch): Promise<DashboardState> {
+  return jsonRequest<DashboardState>("/api/v2/state", { signal }, fetcher);
 }
 
 export function getTaskDetail(taskId: string, fetcher?: Fetcher): Promise<TaskDetail> {
@@ -48,70 +50,45 @@ export function postLegacy(path: "/api/check" | "/api/ack" | "/api/settings", bo
   }, fetcher);
 }
 
-/**
- * The future control API returns its own acceptance/reconciliation receipt.
- * Callers must render that receipt verbatim; submission alone is never success.
- */
-export function postControl(request: ControlRequest, fetcher?: Fetcher): Promise<ControlReceipt> {
-  return jsonRequest<ControlReceipt>("/api/v2/control", {
+/** Return the coordinator receipt for all HTTP statuses, including typed 4xx/5xx rejections. */
+export async function postControl(request: ControlRequest, fetcher: Fetcher = fetch): Promise<ControlReceipt> {
+  const response = await fetcher("/api/v2/control", {
+    credentials: "same-origin",
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
-  }, fetcher);
-}
-
-interface LegacyWorker {
-  id?: unknown;
-  session_id?: unknown;
-  state?: unknown;
-  title?: unknown;
-  name?: unknown;
-  last_sent?: unknown;
-  observed_at?: unknown;
-}
-
-interface LegacyIncident {
-  job?: unknown;
-  kind?: unknown;
-  message?: unknown;
-  at?: unknown;
-}
-
-/** Normalize the existing private history endpoint at the API boundary. */
-export async function getHistory(fetcher?: Fetcher): Promise<HistoryEntry[]> {
-  const snapshot = await jsonRequest<{ workers?: LegacyWorker[]; incidents?: LegacyIncident[] }>("/api/state", undefined, fetcher);
-  const rows: HistoryEntry[] = [];
-  const terminal = new Set(["complete", "completed", "done", "cancelled", "canceled", "failed"]);
-  for (const worker of snapshot.workers ?? []) {
-    const state = typeof worker.state === "string" ? worker.state.toLowerCase() : "";
-    if (!terminal.has(state)) continue;
-    const taskId = typeof worker.id === "string" ? worker.id : null;
-    rows.push({
-      id: `task:${taskId ?? rows.length}`,
-      at: finiteTimestamp(worker.observed_at) ?? finiteTimestamp(worker.last_sent),
-      kind: state,
-      title: stringValue(worker.title) ?? stringValue(worker.name) ?? taskId ?? "Task outcome",
-      detail: "Recorded task state from local Snooze history. Imported usage and validation detail are unavailable.",
-      task_id: taskId,
-    });
+  });
+  let payload: unknown;
+  try { payload = await response.json(); }
+  catch { throw new Error(`Snooze returned an unreadable action receipt (${response.status}).`); }
+  if (!payload || typeof payload !== "object" || !("state" in payload)) {
+    throw new Error(`Snooze returned an invalid action receipt (${response.status}).`);
   }
-  for (const incident of snapshot.incidents ?? []) {
-    rows.push({
-      id: `incident:${rows.length}`,
-      at: finiteTimestamp(incident.at),
-      kind: stringValue(incident.kind) ?? "incident",
-      title: stringValue(incident.job) ?? "Worker event",
-      detail: stringValue(incident.message) ?? "No event detail was recorded.",
-      task_id: stringValue(incident.job),
-    });
-  }
-  return rows.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+  const receipt = payload as Partial<ControlReceipt>;
+  return {
+    action_id: typeof receipt.action_id === "string" ? receipt.action_id : "",
+    state: String(receipt.state),
+    reason: typeof receipt.reason === "string" ? receipt.reason : null,
+    revision: Number.isInteger(receipt.revision) ? Number(receipt.revision) : request.expected_revision,
+    status_code: Number.isInteger(receipt.status_code) ? Number(receipt.status_code) : response.status,
+  };
 }
 
-function stringValue(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
+/** Fetch only the requested server page; never download or retain the full history snapshot. */
+export function getHistory(options: { offset: number; limit: number; query: string }, fetcher: Fetcher = fetch): Promise<HistoryPage> {
+  const params = new URLSearchParams({ offset: String(options.offset), limit: String(options.limit) });
+  if (options.query.trim()) params.set("q", options.query.trim());
+  return jsonRequest<HistoryPage>(`/api/v2/history/events?${params.toString()}`, undefined, fetcher);
 }
 
-function finiteTimestamp(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+export function getQueue(offset: number, limit = 50, fetcher?: Fetcher): Promise<QueuePage> {
+  return jsonRequest<QueuePage>(`/api/v2/queue?offset=${offset}&limit=${limit}`, undefined, fetcher);
+}
+
+export function getProviders(fetcher?: Fetcher): Promise<{ accounts: DashboardState["accounts"] }> {
+  return jsonRequest<{ accounts: DashboardState["accounts"] }>("/api/v2/providers", undefined, fetcher);
+}
+
+export function getInbox(fetcher?: Fetcher): Promise<InboxPage> {
+  return jsonRequest<InboxPage>("/api/v2/inbox", undefined, fetcher);
 }
