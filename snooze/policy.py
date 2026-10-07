@@ -2,7 +2,9 @@
 from snooze.domain import Eligibility
 
 
-DEFAULTS = {'interval':300,'pause_dispatch':True,'emergency_stop':False,'max_concurrent':12,'global_concurrent':24,'max_recoveries':2,'backoff_seconds':60,'reserve':0,'allow_unknown_quota':False,'allow_native':False,'native_ceiling':0,'native_reserve':None,'model_limits':{},'mode':'balanced'}
+DEFAULTS = {'interval':300,'pause_dispatch':True,'emergency_stop':False,'max_concurrent':12,'global_concurrent':24,'max_recoveries':2,'backoff_seconds':60,'stall_seconds':900,'observation_workers':4,'request_timeout':20,'reserve':0,'allow_unknown_quota':False,'allow_native':False,'native_ceiling':0,'native_reserve':None,'model_limits':{},'mode':'balanced'}
+PRESETS={'conservative':{'max_concurrent':4,'global_concurrent':8,'max_recoveries':1,'backoff_seconds':120,'observation_workers':2},
+         'balanced':{'max_concurrent':12,'global_concurrent':24,'max_recoveries':2,'backoff_seconds':60,'observation_workers':4}}
 
 
 class Policy:
@@ -38,7 +40,7 @@ class Policy:
         if quota and quota.get('expires_at') is not None and quota['expires_at'] <= now: quota=None
         if quota is None or quota.get('value') is None:
             if not (config.get('allow_unknown_quota') or self.settings['allow_unknown_quota']): reasons.append('Quota unknown; explicit budget policy needed')
-        elif quota['value'] <= max(config.get('reserve',0),self.settings['reserve']): reasons.append('Quota reserve reached')
+        elif quota['value'] <= max(config.get('reserve',0),self.settings['reserve'],(self.settings['native_reserve'] or 0) if native else 0): reasons.append('Quota reserve reached')
         # Neutral priors. No invented success/latency score until validated samples exist.
         rank=(-config.get('priority',0), self.occupied.get(account.id,0), account.id)
         return Eligibility(not reasons,tuple(reasons),rank)

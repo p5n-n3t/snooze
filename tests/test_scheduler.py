@@ -39,6 +39,23 @@ class SchedulerTests(unittest.TestCase):
         self.add(); self.scheduler.tick('p',100); self.adapter.state='idle'; self.scheduler.tick('p',101)
         self.assertNotEqual(self.repo.get('t')['state'],'complete')
         self.assertEqual(len(self.adapter.launches),1)
+    def test_busy_without_fresh_progress_alerts_without_duplicate_execution(self):
+        self.add();self.scheduler.tick('p',100)
+        self.adapter.observe=lambda session:{'status':'running','last_event_age_ms':1000000,'relay_alive':True}
+        report=self.scheduler.tick('p',1100)
+        self.assertIn({'task':'t','action':'stalled_needs_inspection'},report.decisions)
+        self.assertEqual(len(self.adapter.launches),1);self.assertEqual(self.adapter.resumes,[])
+        self.assertEqual(self.repo.active('p')[0]['data']['incident_kind'],'stalled')
+        self.adapter.observe=lambda session:{'status':'running','last_event_age_ms':0,'relay_alive':True}
+        self.scheduler.tick('p',1101)
+        self.assertIsNone(self.repo.active('p')[0]['data']['incident_kind'])
+
+    def test_presets_and_monitor_bounds_are_explainable_and_finite(self):
+        settings=self.scheduler.configure('p',{'mode':'conservative'})
+        self.assertEqual(settings['max_concurrent'],4)
+        self.assertEqual(settings['max_recoveries'],1)
+        for values in ({'reserve':float('nan')},{'native_reserve':-1},{'observation_workers':9},{'request_timeout':31}):
+            with self.subTest(values=values),self.assertRaises(ValueError):self.scheduler.configure('p',values)
     def test_valid_output_finishes_before_replacement(self):
         self.add(); self.add('u','2'); self.scheduler.tick('p',100)
         self.adapter.artifact={'records':[{'id':'1'}]}; self.adapter.state='idle'

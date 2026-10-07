@@ -11,13 +11,19 @@ def normalize_status(payload):
     if not isinstance(value, dict):
         value = payload
     status = value.get('sessionStatus', value.get('status', 'unknown'))
+    relay=value.get('relayHealth',{}) if isinstance(value.get('relayHealth'),dict) else {}
+    age=relay.get('lastEventAgoMs',value.get('last_event_age_ms'))
+    alive=relay.get('alive',value.get('relay_alive'))
     return {'status': status if isinstance(status, str) else 'unknown',
-            'model': value.get('model'), 'effort': value.get('reasoningEffort')}
+            'model': value.get('model'), 'effort': value.get('reasoningEffort',value.get('effort')),
+            'last_event_age_ms':age if type(age) is int and 0<=age<=365*86400*1000 else None,
+            'relay_alive':alive if type(alive) is bool else None}
 
 
 class LightSprint:
-    def __init__(self, config_path: Path):
+    def __init__(self, config_path: Path, timeout=20):
         self.config_path = config_path
+        self.timeout=timeout
 
     def request(self, server_key, method, path, body=None):
         servers = tomllib.loads(self.config_path.read_text()).get('mcp_servers', {})
@@ -37,7 +43,7 @@ class LightSprint:
             if ident is not None:
                 payload['id'] = ident
             req = urllib.request.Request(cfg['url'], data=json.dumps(payload).encode(), headers=headers)
-            with urllib.request.urlopen(req, timeout=20) as response:
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 session = response.headers.get('Mcp-Session-Id')
                 if session:
                     headers['Mcp-Session-Id'] = session
