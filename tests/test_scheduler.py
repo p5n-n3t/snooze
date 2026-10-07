@@ -45,6 +45,13 @@ class SchedulerTests(unittest.TestCase):
         self.scheduler.tick('p',101)
         self.assertEqual(self.repo.get('t')['state'],'complete')
         self.assertEqual(len(self.adapter.launches),2)
+
+    def test_late_saved_generation_is_quarantined_without_blocking_current_owner(self):
+        self.add();self.scheduler.tick('p',100)
+        self.adapter.artifact={'generation':0,'records':[{'id':'1'}]}
+        self.scheduler.tick('p',101)
+        self.assertEqual(self.repo.get('t')['state'],'running')
+        self.assertEqual(self.repo.artifacts(self.repo.active('p')[0]['id'])[0]['state'],'quarantined')
     def test_timeout_stays_reserved_across_restart_no_duplicate_launch(self):
         self.add(); self.adapter.timeout=True; self.scheduler.tick('p',100)
         new=Scheduler(self.repo,self.registry,ValidatorRegistry())
@@ -85,6 +92,16 @@ class SchedulerTests(unittest.TestCase):
         self.repo.reserve=racing
         self.scheduler.tick('p',100)
         self.assertEqual(self.adapter.launches,[])
+
+    def test_broken_account_cools_down_without_blocking_healthy_work(self):
+        self.registry.upsert_public_config('a',{'capacity':4})
+        self.registry.upsert_public_config('b',{'adapter':'ssh','models':['small'],'efforts':['low'],'capacity':2,'health':'healthy','allow_unknown_quota':True},trusted=True)
+        healthy=FakeAdapter();self.registry.overrides['b']=healthy
+        self.adapter.timeout=True;self.add('first','1');self.add('second','2');self.add('third','3')
+        self.scheduler.tick('p',100)
+        self.assertEqual(len(self.adapter.launches),1)
+        self.assertEqual(len(healthy.launches),2)
+        self.assertGreater(self.registry.get('a')['cooldown_until'],100)
     def test_recoveries_have_persisted_backoff_and_stop_after_two(self):
         self.add(); self.scheduler.tick('p',100); self.adapter.state='failed'
         self.scheduler.tick('p',101); self.scheduler.tick('p',102)

@@ -45,7 +45,17 @@ class Scheduler:
     def _record(self, project, kind, payload, task=None, attempt=None, now=None):
         with self.repo.connection(True) as c: self.repo.event(c,project,kind,payload,task,attempt,now)
 
+    def _cooldown(self,account,settings,now,error_kind):
+        config=self.registry.get(account)
+        count=min(config.get('failure_count',0)+1,16)
+        self.registry.upsert_public_config(account,{'failure_count':count,'error_kind':error_kind,
+            'cooldown_until':now+min(settings['backoff_seconds']*(2**min(count-1,6)),3600)},trusted=True)
+
     def _validate(self, attempt, artifact, now):
+        generation=artifact.get('generation',attempt['generation']) if isinstance(artifact,dict) else attempt['generation']
+        if generation!=attempt['generation']:
+            self.repo.record_artifact(attempt['id'],generation,artifact)
+            return {'task':attempt['task'],'action':'late_artifact_quarantined'}
         spec=self.repo.spec(attempt['task']); result=self.validators.validate(spec,artifact)
         accepted=self.repo.record_artifact(attempt['id'],attempt['generation'],artifact)
         with self.repo.connection(True) as c:
@@ -112,6 +122,7 @@ class Scheduler:
                         action=self._recover(attempt,adapter,status,settings,now) if managed and status=='failed' and attempt['state']!='blocked' else 'awaiting_saved_output'
                         decisions.append({'task':attempt['task'],'action':action})
                 except Exception as e:
+                    self._cooldown(attempt['account'],settings,now,type(e).__name__)
                     errors.append({'task':attempt['task'],'account':attempt['account'],'kind':type(e).__name__})
             active=self.repo.active(project_id); counts=Counter(a['account'] for a in active)
             configs={a['id']:self.registry.get(a['id']) for a in self.registry.list_public()}
@@ -144,6 +155,8 @@ class Scheduler:
                     self.repo.update_attempt(receipt.attempt_id,'running',session=launched['session_id'],data=launched,now=now)
                     decisions.append({'task':spec.id,'action':'launched','account':account,'attempt':receipt.attempt_id})
                 except Exception as e:
+                    self._cooldown(account,settings,now,type(e).__name__)
+                    configs[account]=self.registry.get(account)
                     self.repo.update_attempt(receipt.attempt_id,'ambiguous',data={'reason':'Launch acceptance uncertain','error_kind':type(e).__name__},now=now)
                     errors.append({'task':spec.id,'account':account,'kind':'ambiguous_launch'})
                 counts[account]+=1; active=self.repo.active(project_id); global_count+=1

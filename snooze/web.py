@@ -89,7 +89,7 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
                     from snooze.control_views import extend_dashboard
                     state = extend_dashboard(state, control, project)
                 return self.send(state)
-            if path in ('/api/v2/providers', '/api/v2/queue', '/api/v2/events'):
+            if path in ('/api/v2/providers', '/api/v2/queue', '/api/v2/events','/api/v2/inbox'):
                 if not authorized_read(self.headers, host, token):
                     return self.send({'error': 'Private read authentication required'}, 403)
                 if control is None:
@@ -98,6 +98,11 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
                     query = parse_qs(urlparse(self.path).query)
                     if path == '/api/v2/providers':
                         return self.send({'accounts': control.registry.list_public()})
+                    if path == '/api/v2/inbox':
+                        from snooze.outbox import Outbox
+                        return self.send({'deliveries':Outbox(control.repo).list(project)[-200:],
+                                          'wake_mode':'configured-channel' if config.get('notifications') else 'inbox-only',
+                                          'reason':None if config.get('notifications') else 'No documented coordinator wake channel is configured. Consume the inbox through the dashboard or Snooze MCP.'})
                     if path == '/api/v2/queue':
                         from snooze.control_views import task_row
                         offset = int(query.get('offset', ['0'])[0]); limit = int(query.get('limit', ['50'])[0])
@@ -164,6 +169,8 @@ def _make_server(store, project, monitor, token, port=8765, project_config=None,
                     return self.send(asdict(result), result.status_code)
                 if self.path == '/api/settings':
                     store.set_settings(project, body)
+                    if control is not None:
+                        control.scheduler.configure(project,{'interval':body.get('interval',300)},'legacy-ui')
                 elif self.path == '/api/check':
                     if not check_lock.acquire(blocking=False):
                         return self.send({'error': 'Check already running'}, 409)

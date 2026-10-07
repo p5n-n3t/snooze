@@ -8,14 +8,15 @@ from snooze.adapters.lightsprint import LightSprintAdapter
 
 
 PUBLIC_FIELDS = {'label','adapter','enabled','capacity','models','efforts','priority','tools','privacy','quality','reserve','allow_unknown_quota','quota_override','cooldown_until'}
-BACKEND_FIELDS = {'mcp_key','workspace_id','stack_id','repo_id','verified_capacity','verified_operations','launch_verified','health'}
+BACKEND_FIELDS = {'mcp_key','workspace_id','stack_id','repo_id','verified_capacity','verified_operations','launch_verified','health','artifact_repo','artifact_prefix','artifact_credential_ref','failure_count','error_kind'}
 ADAPTERS = {'lightsprint','local','native','ssh','tailscale','ollama','v0','figma','external'}
 
 
 class ProviderRegistry:
-    def __init__(self, repository, transport=None):
+    def __init__(self, repository, transport=None, collector=None):
         self.repo = repository
         self.transport = transport
+        self.collector = collector
         self.overrides = {}
 
     def get(self, id):
@@ -62,7 +63,7 @@ class ProviderRegistry:
         if id in self.overrides: return self.overrides[id]
         config = self.get(id)
         if not config: raise ValueError('Unknown account')
-        if config['adapter'] == 'lightsprint' and self.transport is not None: return LightSprintAdapter(config, self.transport)
+        if config['adapter'] == 'lightsprint' and self.transport is not None: return LightSprintAdapter(config, self.transport, self.collector)
         return RegisteredAdapter(config)
 
     def public(self, config):
@@ -91,5 +92,5 @@ class ProviderRegistry:
         result = self.transport.request(config['mcp_key'], 'GET', '/api/repos')
         workspaces = {r.get('workspaceId') for r in result.get('repos',[]) if isinstance(r,dict)}
         if config.get('workspace_id') and config['workspace_id'] not in workspaces: raise ValueError('Configured workspace not accessible')
-        self.upsert_public_config(id, {'health':'healthy'}, trusted=True)
+        self.upsert_public_config(id, {'health':'healthy','failure_count':0,'cooldown_until':0,'error_kind':None}, trusted=True)
         return self.snapshot(id)

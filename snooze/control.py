@@ -27,6 +27,21 @@ class Control:
         owner=project['executor'] if project else 'external-managed'
         revision=settings['revision']
         try:
+            if action in ('coordinator-register','incident-ack'):
+                from snooze.outbox import Outbox
+                box=Outbox(self.repo)
+                if action=='coordinator-register':
+                    box.register_coordinator(values['coordinator_id'],[project_id]);return receipt('confirmed')
+                if not any(d['id']==target_id for d in box.list(project_id)):return receipt('rejected','Unknown delivery in this project',404)
+                acknowledged=box.acknowledge(target_id,values['coordinator_id'])
+                return receipt('confirmed' if acknowledged else 'rejected',None if acknowledged else 'Register a coordinator for this project first.',200 if acknowledged else 409)
+            if action=='task-add':
+                from snooze.queueing import add_packet
+                row=add_packet(self.repo,project_id,values,approved=False)
+                revision=row['revision']; self.scheduler.wake.set(); return receipt('confirmed')
+            if action=='account-test':
+                self.registry.test_connection(target_id)
+                revision=self.registry.get(target_id)['revision'];return receipt('confirmed')
             if action in ('policy-config','dispatch-pause','emergency-stop'):
                 if action!='policy-config' and owner!='snooze': return receipt('rejected','External dispatcher owns this project; Snooze cannot pause or stop it.',409)
                 changes=values
@@ -79,7 +94,9 @@ class Control:
                 self.repo.event(c,project_id,'control_'+action,{'actor':actor_id,'action':action},target_id,now=time.time())
             self.scheduler.wake.set(); revision+=1
             return receipt('confirmed')
-        except (ValueError,TypeError) as e:
+        except (ValueError,TypeError,KeyError) as e:
             return receipt('rejected',str(e) if isinstance(e,ValueError) else 'Invalid value type',409 if str(e)=='Stale revision' else 400)
         except (TimeoutError,ConnectionError):
             return receipt('pending','Provider acceptance uncertain; reconcile before repeating.',202)
+        except (RuntimeError,OSError):
+            return receipt('rejected','Provider unavailable; inspect the task and reconcile ownership before repeating a mutation.',503)

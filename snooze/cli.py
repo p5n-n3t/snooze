@@ -41,6 +41,8 @@ def main():
     server = subs.add_parser('serve'); server.add_argument('--open', action='store_true'); server.add_argument('--port', type=int, default=8765)
     opener = subs.add_parser('open'); opener.add_argument('--port',type=int,default=8765); opener.add_argument('--no-browser',action='store_true')
     mcp = subs.add_parser('mcp')
+    enqueue = subs.add_parser('enqueue');enqueue.add_argument('--file',type=Path,required=True);enqueue.add_argument('--approve',action='store_true')
+    service = subs.add_parser('install-service');service.add_argument('--name',default='snooze.service');service.add_argument('--port',type=int,default=8765)
     for command in ('status', 'incidents', 'check', 'config'):
         subs.add_parser(command)
     args = parser.parse_args()
@@ -53,6 +55,14 @@ def main():
     from snooze.runtime import Runtime
     runtime = Runtime(state,config)
     store = runtime.store; project = runtime.project
+    if args.command == 'install-service':
+        from snooze.service import install_service
+        print(install_service(state,args.name,args.port));return
+    if args.command == 'enqueue':
+        from snooze.queueing import add_packet
+        if args.file.stat().st_size>1024*1024:parser.error('Task packet exceeds 1 MiB')
+        row=add_packet(runtime.repo,project,json.loads(args.file.read_text()),approved=args.approve)
+        print(json.dumps({'id':row['id'],'state':row['state'],'approved':row['spec']['approved']}));return
     if args.command == 'mcp':
         import sys
         from snooze.mcp_server import MCPFacade

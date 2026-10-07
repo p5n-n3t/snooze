@@ -45,7 +45,7 @@ class MCPFacade:
                 fields={
                     'snapshot':{},'events':{'after':{'type':'integer','minimum':0},'limit':{'type':'integer','minimum':1,'maximum':200}},
                     'incidents':{},'tasks':{},'task':{'task_id':{'type':'string'}},
-                    'control':{'action':{'type':'string','enum':['hold','approve','prioritize','resume','retry','cancel','reassign','account-config','policy-config','dispatch-pause','emergency-stop']},'target_id':{'type':'string'},'values':{'type':'object'},'expected_revision':{'type':'integer','minimum':0}},
+                    'control':{'action':{'type':'string','enum':['task-add','hold','approve','prioritize','resume','retry','cancel','reassign','account-config','account-test','policy-config','dispatch-pause','emergency-stop','coordinator-register','incident-ack']},'target_id':{'type':'string'},'values':{'type':'object'},'expected_revision':{'type':'integer','minimum':0}},
                     'register':{'coordinator_id':{'type':'string'}},'acknowledge':{'coordinator_id':{'type':'string'},'delivery_id':{'type':'string'}}}
                 optional={'events':{'after','limit'},'control':{'values'}}
                 result={'tools':[{'name':'snooze_'+name,'description':'Scoped Snooze '+name+'; delivery acceptance is not acknowledgment or resolution.',

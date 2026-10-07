@@ -47,6 +47,14 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(self.post('policy-config',{'interval':60},origin='https://evil.test')[0],403)
         self.assertEqual(self.post('account-config',{'http_headers':{'Authorization':'secret'}},target='a')[0],400)
 
+    def test_provider_connection_failure_is_a_receipt_not_an_http_disconnect(self):
+        self.registry.upsert_public_config('a',{})
+        def fail(id):raise RuntimeError('Private provider error')
+        self.registry.test_connection=fail
+        code,body=self.post('account-test',{},revision=1,target='a')
+        self.assertEqual(code,503);self.assertEqual(body['state'],'rejected')
+        self.assertNotIn('Private provider error',str(body))
+
     def test_external_owner_cannot_pretend_to_pause_dispatcher(self):
         code,body=self.post('dispatch-pause',{'paused':True})
         self.assertEqual(code,409)

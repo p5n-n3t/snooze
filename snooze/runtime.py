@@ -30,11 +30,13 @@ class Runtime:
         self.repo = TaskRepository(self.store.path)
         self.repo.register_project(self.project, config['repo'], config.get('remote'))
         self.transport = LightSprint(Path(config['config_path']))
-        self.registry = ProviderRegistry(self.repo, self.transport)
+        from snooze.artifacts import GitHubArtifacts
+        credentials = CredentialStore(self.state / 'credentials.json')
+        self.registry = ProviderRegistry(self.repo, self.transport, GitHubArtifacts(credentials))
         self.scheduler = Scheduler(self.repo, self.registry, ValidatorRegistry())
         self.control = Control(self.repo, self.registry, self.scheduler)
         self.monitor = Monitor(self.store, observe or self.transport.observe)
-        self.channels = NotificationChannels(config.get('notifications',{}), config.get('approved_commands',()), credentials=CredentialStore(self.state / 'credentials.json'))
+        self.channels = NotificationChannels(config.get('notifications',{}), config.get('approved_commands',()), credentials=credentials)
         self.outbox = Outbox(self.repo, self.channels.deliver)
         self.lock = threading.Lock(); self.stopped = threading.Event()
         with self.repo.connection(True) as c:
@@ -66,6 +68,14 @@ class Runtime:
 
     def _bridge_incidents(self, now):
         workers = self.store.snapshot(self.project)['workers']
+        for attempt in self.repo.active(self.project):
+            with self.repo.connection() as c:
+                observed=c.execute('SELECT at,data FROM events WHERE attempt=? AND kind="provider_observed" ORDER BY id DESC LIMIT 1',(attempt['id'],)).fetchone()
+            observation=json.loads(observed['data']) if observed else {}
+            if attempt['state'] in ('blocked','ambiguous'):
+                observation={'status':'failed' if attempt['state']=='blocked' else 'ownership_unknown'}
+            workers.append({'id':'attempt:'+attempt['id'],'session_id':attempt['session'],'server_key':attempt['account'],
+                            'observation':observation,'observed_at':observed['at'] if observed else None,'task_id':attempt['task']})
         for job in workers:
             kind = (job.get('observation') or {}).get('status')
             kind = kind if kind in ALERT_STATES else None
@@ -78,7 +88,7 @@ class Runtime:
                 incident = uuid.uuid4().hex if kind else None
                 c.execute('INSERT INTO incident_episodes VALUES(?,?,?,?) ON CONFLICT(project,job) DO UPDATE SET kind=excluded.kind,incident=excluded.incident',(self.project,job['id'],kind,incident))
             if incident:
-                payload = {'project':self.project,'task':job['id'],'account':job.get('server_key'),'session':job.get('session_id'),
+                payload = {'project':self.project,'task':job.get('task_id',job['id']),'account':job.get('server_key'),'session':job.get('session_id'),
                            'kind':kind,'observed_at':job.get('observed_at'),'message':f'Worker is {kind}; saved output must be checked before reassignment.',
                            'suggested_next_step':'Inspect task, artifacts and ownership; reconcile before retry.'}
                 channels = list(self.config.get('notifications',{})) or ['inbox']
