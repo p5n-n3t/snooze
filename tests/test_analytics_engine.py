@@ -22,6 +22,10 @@ class RawResponse(Response):
 
 
 class AnalyticsEngineTests(unittest.TestCase):
+    def test_safe_field_names_do_not_make_credential_like_text_public(self):
+        result=EngineClient._sanitize({'name':'Bearer private-value','model':'lsat_privatevalue123'})
+        self.assertNotIn('private-value',str(result));self.assertNotIn('lsat_private',str(result))
+
     def setUp(self):
         self.filters = HistoryFilter((), None, None, 'UTC', (), (), (), None)
 

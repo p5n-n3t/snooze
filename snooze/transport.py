@@ -14,8 +14,10 @@ def normalize_status(payload):
     relay=value.get('relayHealth',{}) if isinstance(value.get('relayHealth'),dict) else {}
     age=relay.get('lastEventAgoMs',value.get('last_event_age_ms'))
     alive=relay.get('alive',value.get('relay_alive'))
+    model=value.get('model'); effort=value.get('reasoningEffort',value.get('effort'))
     return {'status': status if isinstance(status, str) else 'unknown',
-            'model': value.get('model'), 'effort': value.get('reasoningEffort',value.get('effort')),
+            'model': model[:200] if isinstance(model,str) else None,
+            'effort': effort[:100] if isinstance(effort,str) else None,
             'last_event_age_ms':age if type(age) is int and 0<=age<=365*86400*1000 else None,
             'relay_alive':alive if type(alive) is bool else None}
 

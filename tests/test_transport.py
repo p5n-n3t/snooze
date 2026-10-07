@@ -19,6 +19,10 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(value['model'], 'small')
         self.assertNotIn('private', str(value))
 
+    def test_model_and_effort_cannot_smuggle_nested_private_objects(self):
+        result=normalize_status({'status':{'sessionStatus':'running','model':{'Authorization':'secret'},'reasoningEffort':['secret']}})
+        self.assertIsNone(result['model']);self.assertIsNone(result['effort']);self.assertNotIn('secret',str(result))
+
     def test_provider_compatible_user_agent_is_sent(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / 'config.toml'

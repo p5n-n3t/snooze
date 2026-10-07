@@ -218,7 +218,8 @@ class EngineClient:
             if isinstance(value, float) and not math.isfinite(value): return None
             return value
         if isinstance(value, str):
-            return value[:1000]
+            # An allowed field name is not permission to expose secret-like text.
+            return re.sub(r'(?i)Bearer\s+\S+|lsat_[A-Za-z0-9_-]+','[redacted]',value[:1000])
         if isinstance(value, list):
             return [clean for item in value[:500] if (clean := cls._sanitize(item, depth + 1)) is not None]
         if isinstance(value, dict):
