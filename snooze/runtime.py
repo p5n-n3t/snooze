@@ -37,6 +37,8 @@ class Runtime:
         from snooze.analytics_engine import EngineClient
         engine_config=config.get('analytics_engine',{})
         engine=None;engine_error=None
+        if not isinstance(engine_config,dict):
+            engine_config={};engine_error='configuration_invalid'
         if engine_config.get('base_url'):
             try:
                 engine=EngineClient(engine_config['base_url'],allowed_hosts=engine_config.get('allowed_hosts',()),

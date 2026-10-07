@@ -1,11 +1,13 @@
 """Bounded project-scoped event feed for browser and coordinator consumers."""
 import json
+import re
 
 FIELDS={'state','status','model','effort','account','generation','revision','actor','reason','message','validation','artifact_hash','error_kind','recovery_count','recovery_due','executor','action'}
 
 
 def public_event(data):
-    return {k:v for k,v in data.items() if k in FIELDS and isinstance(v,(str,int,float,bool,type(None)))}
+    return {k:(re.sub(r'(?i)Bearer\s+\S+|lsat_[A-Za-z0-9_-]+','[redacted]',v[:4000]) if isinstance(v,str) else v)
+            for k,v in data.items() if k in FIELDS and isinstance(v,(str,int,float,bool,type(None)))}
 
 
 class EventFeed:

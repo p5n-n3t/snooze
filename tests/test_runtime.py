@@ -48,6 +48,12 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.history.engine_report({})['error_kind'],'configuration_invalid')
         self.assertEqual(runtime.check(runtime.project)['checked'],0)
 
+    def test_malformed_optional_engine_configuration_cannot_stop_monitoring(self):
+        self.config['analytics_engine']='not a mapping'
+        runtime=Runtime(self.state,self.config,observe=lambda job:{})
+        self.assertEqual(runtime.history.engine_report({})['error_kind'],'configuration_invalid')
+        self.assertEqual(runtime.check(runtime.project)['checked'],0)
+
     def test_collector_failure_is_deduplicated_and_verified_completion_resolves_it(self):
         runtime = Runtime(self.state, self.config, observe=lambda job: {})
         runtime.repo.add(TaskSpec('t',runtime.project,('record:1',),'ref','hash',{}, {},'json-records',True))

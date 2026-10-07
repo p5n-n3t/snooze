@@ -6,6 +6,11 @@ from snooze.events import EventFeed
 
 
 class EventTests(unittest.TestCase):
+    def test_allowed_event_message_redacts_credential_like_text(self):
+        from snooze.events import public_event
+        value=public_event({'message':'Bearer dummy-secret lsat_dummyvalue','Authorization':'secret'})
+        self.assertNotIn('dummy-secret',str(value));self.assertNotIn('lsat_dummy',str(value));self.assertNotIn('Authorization',value)
+
     def test_cursor_pagination_is_project_scoped_and_allowlisted(self):
         with tempfile.TemporaryDirectory() as d:
             repo=TaskRepository(Path(d)/'s.sqlite')
