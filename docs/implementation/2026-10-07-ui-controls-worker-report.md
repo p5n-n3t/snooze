@@ -2,7 +2,7 @@
 
 ## Scope and result
 
-Completed the UI repair and bounded Task 4 controls in `p5n-n3t/snooze` on the existing task branch, `ls/13-snooze-command-centre-svelte-ui-implemen-m68a`. The first UI commit `edb56f9` and all append-only history remain intact. The task branch includes a merge of the latest coordinator head, `origin/codex/snooze-command-centre` at `2e05cc1`; it was merged without rebasing or force-pushing. Authored follow-up changes are confined to `frontend/`, generated `snooze/static/`, and this report.
+Completed the UI repair and bounded Task 4 controls in `p5n-n3t/snooze` on the existing task branch, `ls/13-snooze-command-centre-svelte-ui-implemen-m68a`. The first UI commit `edb56f9` and all append-only history remain intact. The task branch includes the latest coordinator updates available during this run, through `origin/codex/snooze-command-centre` at `eaf4db9`; they were merged without rebasing or force-pushing. Authored follow-up changes are confined to `frontend/`, generated `snooze/static/`, and this report.
 
 The three Important findings are fixed:
 
@@ -23,14 +23,16 @@ The final verification ran on 2026-10-07 using Node `v22.19.0`, npm `10.9.3`, an
 | `npm run build` | Passed: Vite emitted the hashed JS/CSS, self-hosted fonts and logo; `package-assets.mjs` replaced obsolete bundles and copied notices into `snooze/static/`. |
 | `npm run e2e` | Passed after the latest coordinator merge: all 4 Playwright tests against Snooze's Python HTTP handler. This covers receipt states and control persistence, capability gates, acknowledgment semantics, cancellation remaining pending while ownership persists, both themes, desktop/mobile layouts, keyboard focus, and a hanging state endpoint with no overlapping requests and teardown. |
 | `python3 -m unittest discover -s tests -p 'test_tasks.py' -v` | Passed after the coordinator merge: 11 task repository tests, including the new guarded handover case. |
-| `python -m pip wheel . --no-deps --no-build-isolation --wheel-dir /tmp/snooze-wheel-final` plus wheel-member assertion | Passed: built `snooze_workers-0.1.0-py3-none-any.whl` (1,155,046 bytes); all 9 required current bundle/index/license entries were present. |
+| `python3 -m unittest discover -s tests -p 'test_scheduler.py' -q` | Passed after the latest coordinator merge: 13 scheduler tests, including monitor resource and preset behavior. |
+| `python3 -m unittest discover -s tests -p 'test_transport.py' -q` | Passed after the latest coordinator merge: 3 transport tests. |
+| `python -m pip wheel . --no-deps --no-build-isolation --wheel-dir /tmp/snooze-wheel-final` plus wheel-member assertion | Passed: built `snooze_workers-0.1.0-py3-none-any.whl` (1,155,761 bytes); all 9 required current bundle/index/license entries were present. |
 | `git diff --cached --check` on authored sources | Passed. The generated one-line Vite bundle contains an intentional whitespace-character literal, which Git's whitespace check reports as trailing whitespace; no authored source has trailing whitespace. |
 
 The final browser fixture reported 100 active worker rows and a 51,445-byte schema-v2 state response. With 10,002 history events, the history request returned 5,820 bytes and the page rendered 25 rows. These are fixture measurements, not production-load guarantees. The Vite output was 151.41 kB JavaScript and 59.16 kB CSS before gzip.
 
 ## Rendered evidence
 
-The nine current browser screenshots are attached under their existing labels: Watch dark/light on desktop and mobile, Queue, Providers, History, Settings, and the mobile task drawer. Playwright rendered them through the real Python HTTP handler with the production static bundle; the screenshot artifacts were uploaded and registered with source coverage. The stack has no configured preview service (`inspect_preview` confirmed there is no live app route to capture), so the server-side preview capture tool was unavailable. After the screenshots were refreshed, the coordinator merge changed backend task ownership only; the covered UI source hashes remain unchanged. The browser test also asserts no external requests and no console/page errors.
+The nine current browser screenshots are attached under their existing labels: Watch dark/light on desktop and mobile, Queue, Providers, History, Settings, and the mobile task drawer. Playwright rendered them through the real Python HTTP handler with the production static bundle; the screenshot artifacts were uploaded and registered with source coverage. The stack has no configured preview service (`inspect_preview` confirmed there is no live app route to capture), so the server-side preview capture tool was unavailable. After the coordinator merges changed task ownership and monitor/policy scheduling behavior, Watch dark desktop and Settings were recaptured and now cover the relevant runtime, scheduler, policy, and task ownership sources; remaining views are covered by unchanged UI sources. The later history-review update was documentation-only. The browser test also asserts no external requests and no console/page errors.
 
 ## Reuse, licensing, and limits
 
