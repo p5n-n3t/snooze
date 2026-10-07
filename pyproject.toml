@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 snooze = "snooze.cli:main"
 
 [tool.setuptools.package-data]
-snooze = ["static/*"]
+snooze = ["static/*", "static/**/*"]
 
 [tool.setuptools.packages.find]
 include = ["snooze*"]
