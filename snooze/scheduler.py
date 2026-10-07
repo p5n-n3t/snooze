@@ -76,12 +76,12 @@ class Scheduler:
             self.repo.update_attempt(attempt['id'],'blocked',data={'reason':'Recovery limit exhausted'},now=now)
             return 'recovery_exhausted'
         if not adapter.capabilities().get('resume',{}).get('supported'): return 'resume_unsupported'
-        next_data={'recovery_count':count+1,'recovery_due':now+settings['backoff_seconds']*(2**count)}
+        next_data={'recovery_count':count+1,'recovery_due':now+settings['backoff_seconds']*(2**count),'resume_message_id':str(uuid.uuid4())}
         # Persist the bound before network I/O; a crash cannot reset the budget.
         self.repo.update_attempt(attempt['id'],'awaiting_output',data=next_data,now=now)
         task=self.repo.get(attempt['task'])
         try:
-            adapter.resume(attempt['session'],{**attempt,'instructions':task['instructions']})
+            adapter.resume(attempt['session'],{**self.repo.attempt(attempt['id']),'instructions':task['instructions']})
             return 'resume_requested'
         except Exception:
             self.repo.update_attempt(attempt['id'],'ambiguous',data={'reason':'Resume acceptance uncertain'},now=now)

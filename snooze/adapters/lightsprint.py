@@ -58,7 +58,9 @@ class LightSprintAdapter(BaseAdapter):
 
     def resume(self, session_id, attempt):
         self.require('resume')
-        self.transport.request(self.config['mcp_key'], 'POST', f'/api/agent-sessions/{identifier(session_id)}/chat', {'content': attempt.get('instructions', '')})
+        message_id=attempt.get('data',{}).get('resume_message_id')
+        if not message_id:raise ValueError('Persist a client message ID before continuation')
+        self.transport.request(self.config['mcp_key'], 'POST', f'/api/agent-sessions/{identifier(session_id)}/chat', {'message': attempt.get('instructions', ''),'clientMessageId':message_id})
         return {'state': 'pending', 'session_id': session_id}
 
     def cancel(self, session_id):

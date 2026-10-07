@@ -45,9 +45,10 @@ class AdapterTests(unittest.TestCase):
     def test_resume_is_pending_not_completed(self):
         transport = RecordingTransport()
         adapter = LightSprintAdapter({'id': 'a', 'mcp_key': 'key', 'verified_operations': ['resume', 'cancel']}, transport)
-        result = adapter.resume('session-1', {'instructions': 'Continue the exact assignment'})
+        result = adapter.resume('session-1', {'instructions': 'Continue the exact assignment','data':{'resume_message_id':'client-1'}})
         self.assertEqual(result['state'], 'pending')
         self.assertEqual(transport.calls[0][2], '/api/agent-sessions/session-1/chat')
+        self.assertEqual(transport.calls[0][3],{'message':'Continue the exact assignment','clientMessageId':'client-1'})
         self.assertEqual(adapter.cancel('session-1')['state'], 'pending')
 
     def test_future_registration_does_not_advertise_execution(self):
