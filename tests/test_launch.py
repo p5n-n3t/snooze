@@ -53,3 +53,11 @@ class LaunchTests(unittest.TestCase):
         with patch('snooze.launch.probe', side_effect=[None, None, {'name':'snooze','api_version':2,'project':self.config['project_id']}]), patch('snooze.launch.start_daemon') as start, patch('snooze.launch.time.sleep'):
             open_dashboard(self.state, 8999, lambda url: False)
         start.assert_called_once()
+
+    def test_default_open_reuses_registered_custom_service_port(self):
+        config={**self.config,'user_service':'snooze-test.service','service_port':9000}
+        (self.state/'project.json').write_text(json.dumps(config))
+        with patch('snooze.launch.probe',return_value={'name':'snooze','api_version':2,'project':self.config['project_id']}) as probe:
+            url=open_dashboard(self.state,None,lambda url:False)
+        probe.assert_called_once_with(9000)
+        self.assertEqual(url,'http://127.0.0.1:9000/')

@@ -39,7 +39,7 @@ def main():
     subs = parser.add_subparsers(dest='command')
     init = subs.add_parser('init'); init.add_argument('--repo', type=Path, required=True); init.add_argument('--queue', type=Path)
     server = subs.add_parser('serve'); server.add_argument('--open', action='store_true'); server.add_argument('--port', type=int, default=8765)
-    opener = subs.add_parser('open'); opener.add_argument('--port',type=int,default=8765); opener.add_argument('--no-browser',action='store_true')
+    opener = subs.add_parser('open'); opener.add_argument('--port',type=int); opener.add_argument('--no-browser',action='store_true')
     mcp = subs.add_parser('mcp')
     enqueue = subs.add_parser('enqueue');enqueue.add_argument('--file',type=Path,required=True);enqueue.add_argument('--approve',action='store_true')
     history=subs.add_parser('history');history.add_argument('--format',choices=['json','csv'],default='json');history.add_argument('--from-utc');history.add_argument('--to-utc');history.add_argument('--timezone',default='UTC')
@@ -54,7 +54,7 @@ def main():
     args = parser.parse_args()
     state = args.state
     if args.command in (None,'open'):
-        print(open_dashboard(state,getattr(args,'port',8765),webbrowser.open if not getattr(args,'no_browser',False) else lambda url:False)); return
+        print(open_dashboard(state,getattr(args,'port',None),webbrowser.open if not getattr(args,'no_browser',False) else lambda url:False)); return
     if args.command == 'init':
         print(json.dumps(prime(args.repo, state, args.queue), indent=2)); return
     config = json.loads((state / 'project.json').read_text())

@@ -28,6 +28,7 @@ def install_service(state, name='snooze.service', port=8765):
     target.parent.mkdir(parents=True,exist_ok=True)
     target.write_text(render_unit(state,sys.executable,port))
     config['user_service']=name
+    config['service_port']=port
     (state/'project.json').write_text(json.dumps(config,indent=2))
     subprocess.run(['systemctl','--user','daemon-reload'],check=True,timeout=10)
     subprocess.run(['systemctl','--user','enable','--now',name],check=True,timeout=15)

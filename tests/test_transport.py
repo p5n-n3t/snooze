@@ -1,5 +1,9 @@
 import tempfile
 import unittest
+import threading
+import urllib.request
+import urllib.error
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 from snooze.transport import LightSprint
@@ -35,5 +39,26 @@ class TransportTests(unittest.TestCase):
             def open_request(request, timeout):
                 self.assertEqual(request.get_header('User-agent'), 'Codex MCP')
                 return Response()
-            with patch('urllib.request.urlopen', side_effect=open_request):
+            with patch('urllib.request.OpenerDirector.open', side_effect=open_request):
                 LightSprint(path).request('demo', 'GET', '/api/repos')
+
+    def test_provider_opener_does_not_forward_authentication_on_redirect(self):
+        received=[]
+        class Target(BaseHTTPRequestHandler):
+            def log_message(self,*args):pass
+            def do_GET(self):
+                received.append(self.headers.get('Authorization'))
+                self.send_response(200);self.end_headers()
+        target=ThreadingHTTPServer(('127.0.0.1',0),Target)
+        class Redirect(BaseHTTPRequestHandler):
+            def log_message(self,*args):pass
+            def do_GET(self):
+                self.send_response(302);self.send_header('Location',f'http://127.0.0.1:{target.server_port}/');self.end_headers()
+        source=ThreadingHTTPServer(('127.0.0.1',0),Redirect)
+        for server in (target,source):
+            threading.Thread(target=server.serve_forever,daemon=True).start()
+            self.addCleanup(server.server_close);self.addCleanup(server.shutdown)
+        provider=LightSprint(Path('/unused'))
+        request=urllib.request.Request(f'http://127.0.0.1:{source.server_port}/',headers={'Authorization':'Bearer dummy-not-a-secret'})
+        with self.assertRaises(urllib.error.HTTPError):provider.opener.open(request,timeout=2)
+        self.assertEqual(received,[])

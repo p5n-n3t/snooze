@@ -51,11 +51,12 @@ def start_daemon(state, port, config):
 
 def open_dashboard(state, port, open_browser):
     state = Path(state)
-    if not 1 <= port <= 65535: raise ValueError('Invalid port')
     config_file = state / 'project.json'
     if not config_file.is_file():
         raise RuntimeError('First initialise a project: snooze init --repo /path/to/repo')
     config = json.loads(config_file.read_text())
+    if port is None:port=config.get('service_port',8765)
+    if type(port) is not int or not 1 <= port <= 65535: raise ValueError('Invalid port')
     expected = config.get('project_id', config['project'])
     health = probe(port)
     if health is None:

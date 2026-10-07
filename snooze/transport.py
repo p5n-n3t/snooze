@@ -6,6 +6,11 @@ import urllib.request
 from pathlib import Path
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,req,fp,code,msg,headers,newurl):
+        return None
+
+
 def normalize_status(payload):
     value = payload.get('status', payload)
     if not isinstance(value, dict):
@@ -26,6 +31,7 @@ class LightSprint:
     def __init__(self, config_path: Path, timeout=20):
         self.config_path = config_path
         self.timeout=timeout
+        self.opener=urllib.request.build_opener(NoRedirect())
 
     def request(self, server_key, method, path, body=None):
         servers = tomllib.loads(self.config_path.read_text()).get('mcp_servers', {})
@@ -45,7 +51,7 @@ class LightSprint:
             if ident is not None:
                 payload['id'] = ident
             req = urllib.request.Request(cfg['url'], data=json.dumps(payload).encode(), headers=headers)
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+            with self.opener.open(req, timeout=self.timeout) as response:
                 session = response.headers.get('Mcp-Session-Id')
                 if session:
                     headers['Mcp-Session-Id'] = session
