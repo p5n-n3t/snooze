@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from snooze.cli import prime
 from snooze.runtime import Runtime
+from snooze.domain import CycleReport, TaskSpec
 
 
 class RuntimeTests(unittest.TestCase):
@@ -40,3 +41,29 @@ class RuntimeTests(unittest.TestCase):
         runtime.scheduler.configure(runtime.project, {'interval':30})
         self.assertEqual(runtime.interval(), 30)
         self.assertTrue(runtime.scheduler.wake.is_set())
+
+    def test_invalid_optional_engine_cannot_stop_monitoring(self):
+        self.config['analytics_engine']={'base_url':'https://unapproved.test','allowed_hosts':['other.test'],'project_mapping':'p'}
+        runtime=Runtime(self.state,self.config,observe=lambda job:{})
+        self.assertEqual(runtime.history.engine_report({})['error_kind'],'configuration_invalid')
+        self.assertEqual(runtime.check(runtime.project)['checked'],0)
+
+    def test_collector_failure_is_deduplicated_and_verified_completion_resolves_it(self):
+        runtime = Runtime(self.state, self.config, observe=lambda job: {})
+        runtime.repo.add(TaskSpec('t',runtime.project,('record:1',),'ref','hash',{}, {},'json-records',True))
+        attempt=runtime.repo.reserve('t','a',('record:1',),100)
+        runtime.repo.update_attempt(attempt.attempt_id,'running',session='s',now=100)
+        errors=[{'task':'t','kind':'TimeoutError'}]
+        runtime.scheduler.tick=lambda project:CycleReport(100,101,[],errors)
+        runtime.check(runtime.project);runtime.check(runtime.project)
+        deliveries=runtime.outbox.list(runtime.project)
+        self.assertEqual(len(deliveries),1)
+        self.assertEqual(deliveries[0]['payload']['kind'],'verification_unavailable')
+        errors.clear()
+        # Missing a new error alone does not establish that output is correct.
+        runtime.check(runtime.project)
+        self.assertFalse(runtime.outbox.list(runtime.project)[0]['resolved'])
+        runtime.repo.update_attempt(attempt.attempt_id,'complete',data={'validation':'valid'},now=102)
+        runtime.repo.release(attempt.attempt_id,{'validated':True})
+        runtime.check(runtime.project)
+        self.assertTrue(runtime.outbox.list(runtime.project)[0]['resolved'])

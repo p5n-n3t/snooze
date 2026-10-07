@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from snooze.store import Store
 from snooze.migrations import migrate_state
+from snooze.tasks import TaskRepository
 
 
 class MigrationTests(unittest.TestCase):
@@ -36,3 +37,24 @@ class MigrationTests(unittest.TestCase):
             with closing(sqlite3.connect(path)) as c:
                 self.assertIsNone(c.execute("SELECT name FROM sqlite_master WHERE name='must_not_persist'").fetchone())
             self.assertEqual(Store(path).snapshot('p')['workers'][0]['id'], 'a')
+
+    def test_version_one_database_upgrades_only_by_adding_metrics_tables(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'state.sqlite'
+            repo = TaskRepository(path)
+            repo.register_project('p', '/p')
+            with repo.connection(True) as c:
+                c.execute("INSERT INTO tasks(id,project,spec,instructions,state,created_at,updated_at) VALUES('t','p','{}','','queued',10,10)")
+                c.execute('DROP TABLE history_facts')
+                c.execute('DROP TABLE history_imports')
+                c.execute('DELETE FROM schema_versions WHERE version=2')
+            with closing(sqlite3.connect(path)) as c:
+                c.execute('PRAGMA user_version=1')
+                c.commit()
+            report = migrate_state(path)
+            self.assertTrue(report.changed)
+            self.assertEqual(report.version, 2)
+            with repo.connection() as c:
+                self.assertEqual(c.execute('SELECT id FROM tasks').fetchone()[0], 't')
+                self.assertIsNotNone(c.execute("SELECT name FROM sqlite_master WHERE name='history_facts'").fetchone())
+                self.assertIsNotNone(c.execute("SELECT name FROM sqlite_master WHERE name='history_imports'").fetchone())

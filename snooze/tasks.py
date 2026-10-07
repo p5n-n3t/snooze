@@ -106,6 +106,13 @@ class TaskRepository:
         with self.connection() as c:
             return [self.decode(r) for r in c.execute('SELECT * FROM tasks WHERE project=? ORDER BY priority DESC,created_at,id', (project,))]
 
+    def queue_page(self,project,*,offset=0,limit=50):
+        if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=200:raise ValueError('Invalid queue page')
+        with self.connection() as c:
+            total=c.execute('SELECT COUNT(*) FROM tasks WHERE project=?',(project,)).fetchone()[0]
+            rows=c.execute('SELECT id,project,state,priority,created_at,updated_at,revision,substr(instructions,1,160) AS summary,json_extract(spec,"$.approved") AS approved FROM tasks WHERE project=? ORDER BY priority DESC,created_at,id LIMIT ? OFFSET ?',(project,limit,offset)).fetchall()
+        return {'tasks':[{**dict(r),'approved':bool(r['approved'])} for r in rows],'total':total,'offset':offset,'has_more':offset+len(rows)<total}
+
     def spec(self, id):
         task = self.get(id)
         if not task: raise ValueError('Unknown task')
