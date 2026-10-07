@@ -80,6 +80,10 @@ class TaskRepository:
         if executor not in ('external-managed', 'shadow', 'snooze'): raise ValueError('Invalid executor')
         if executor == 'snooze' and not (quiesced and reconciled): raise ValueError('Handover requires quiescence and reconciled sessions')
         with self.connection(True) as c:
+            current=c.execute('SELECT executor FROM projects WHERE id=?',(project,)).fetchone()
+            if current is None:raise ValueError('Unknown project')
+            if executor=='snooze' and current['executor']!='snooze' and c.execute('SELECT 1 FROM attempts WHERE project=? AND released_at IS NULL',(project,)).fetchone():
+                raise ValueError('Unreconciled attempts still own scopes; handover rejected')
             c.execute('UPDATE projects SET executor=? WHERE id=?', (executor, project))
             self.event(c, project, 'executor_changed', {'executor': executor})
 

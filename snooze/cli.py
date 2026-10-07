@@ -47,6 +47,7 @@ def main():
     provider=subs.add_parser('configure-provider');provider.add_argument('--id',required=True);provider.add_argument('--file',type=Path,required=True)
     engine=subs.add_parser('configure-engine');engine.add_argument('--url',required=True);engine.add_argument('--allow-host',action='append',required=True);engine.add_argument('--project-mapping',required=True);engine.add_argument('--credential-ref')
     engine_test=subs.add_parser('test-engine')
+    takeover=subs.add_parser('take-control',help='Explicit single-owner handover, never an automatic takeover');takeover.add_argument('--external-stopped',action='store_true');takeover.add_argument('--ownership-checked',action='store_true')
     service = subs.add_parser('install-service');service.add_argument('--name',default='snooze.service');service.add_argument('--port',type=int,default=8765)
     for command in ('status', 'incidents', 'check', 'config'):
         subs.add_parser(command)
@@ -63,6 +64,9 @@ def main():
     from snooze.runtime import Runtime
     runtime = Runtime(state,config)
     store = runtime.store; project = runtime.project
+    if args.command=='take-control':
+        runtime.repo.set_executor(project,'snooze',quiesced=args.external_stopped,reconciled=args.ownership_checked)
+        print(json.dumps({'executor':'snooze','pause_dispatch':runtime.scheduler.settings(project)['pause_dispatch'],'notice':'Operator-attested handover; this command did not stop external workers. Approve tasks and explicitly unpause in Settings.'}));return
     if args.command=='test-engine':
         print(json.dumps(runtime.history.engine_report({'kind':['analytics_summary']})));return
     if args.command=='history':

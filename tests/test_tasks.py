@@ -66,6 +66,16 @@ class TaskTests(unittest.TestCase):
             self.repo.reserve('a', 'other', ('record:1',), 10000)
         self.assertTrue(self.repo.release(receipt.attempt_id, {'confirmed_inactive': True}))
 
+    def test_handover_requires_attestation_and_no_unreconciled_scope(self):
+        with self.assertRaises(ValueError):self.repo.set_executor('p','snooze')
+        self.task('owned')
+        attempt=self.repo.reserve('owned','account',('record:1',),100)
+        with self.assertRaises(ValueError):self.repo.set_executor('p','snooze',quiesced=True,reconciled=True)
+        self.assertEqual(self.repo.project('p')['executor'],'external-managed')
+        self.repo.release(attempt.attempt_id,{'confirmed_inactive':True})
+        self.repo.set_executor('p','snooze',quiesced=True,reconciled=True)
+        self.assertEqual(self.repo.project('p')['executor'],'snooze')
+
     def test_unapproved_task_and_changed_scope_rejected(self):
         self.task('a', approved=False)
         with self.assertRaises(ValueError): self.repo.reserve('a', 'account', ('record:1',), 100)
