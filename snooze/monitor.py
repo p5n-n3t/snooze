@@ -8,6 +8,7 @@ class Monitor:
     def __init__(self, store, observe):
         self.store, self.observe = store, observe
         self.lock = threading.Lock()
+        self.max_workers=4
 
     def check(self, project_id):
         if not self.lock.acquire(blocking=False):
@@ -34,6 +35,6 @@ class Monitor:
                                     f'{status}: inspect task and artifacts before any reassignment')
             return status
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as pool:
             statuses = list(pool.map(check_one, jobs))
         return {'started_at': started, 'finished_at': time.time(), 'checked': len(statuses)}

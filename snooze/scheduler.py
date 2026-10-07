@@ -1,12 +1,14 @@
 """Durable, deterministic scheduler. Routine cycles use no reasoning-model calls."""
 import json
+import hashlib
+import math
 import threading
 import time
 import uuid
 from collections import Counter
 from dataclasses import asdict
 from snooze.domain import CycleReport
-from snooze.policy import Policy, DEFAULTS
+from snooze.policy import Policy, DEFAULTS, PRESETS
 from snooze.adapters.base import UnsupportedOperation
 
 
@@ -26,14 +28,18 @@ class Scheduler:
             row=c.execute('SELECT * FROM policy_settings WHERE project=?',(project,)).fetchone()
             revision=row['revision'] if row else 0
             if expected_revision is not None and expected_revision != revision: raise ValueError('Stale revision')
-            settings={**DEFAULTS,**(json.loads(row['data']) if row else {}),**values}
-            for key in ('interval','max_concurrent','global_concurrent','max_recoveries','backoff_seconds','native_ceiling'):
+            settings={**DEFAULTS,**(json.loads(row['data']) if row else {}),**PRESETS.get(values.get('mode'),{}),**values}
+            for key in ('interval','max_concurrent','global_concurrent','max_recoveries','backoff_seconds','native_ceiling','stall_seconds','observation_workers','request_timeout'):
                 minimum=30 if key=='interval' else (0 if key in ('max_recoveries','native_ceiling') else 1)
                 if type(settings[key]) is not int or not minimum<=settings[key]<=86400: raise ValueError('Invalid '+key)
             for key in ('pause_dispatch','emergency_stop','allow_unknown_quota','allow_native'):
                 if type(settings[key]) is not bool: raise ValueError('Invalid '+key)
             if settings['max_recoveries'] > 2: raise ValueError('Maximum two recoveries')
-            if settings['reserve'] < 0: raise ValueError('Reserve must be nonnegative')
+            if settings['observation_workers']>8 or settings['request_timeout']>30:raise ValueError('Observation workers/timeouts exceed safe bounds')
+            for key in ('reserve','native_reserve'):
+                value=settings[key]
+                if key=='native_reserve' and value is None:continue
+                if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<0:raise ValueError('Reserve must be finite and nonnegative')
             if settings['mode'] not in ('conservative','balanced','custom'): raise ValueError('Unknown preset')
             if not isinstance(settings['model_limits'],dict) or any(type(v) is not int or v<1 for v in settings['model_limits'].values()): raise ValueError('Invalid model limits')
             revision+=1
@@ -76,7 +82,8 @@ class Scheduler:
             self.repo.update_attempt(attempt['id'],'blocked',data={'reason':'Recovery limit exhausted'},now=now)
             return 'recovery_exhausted'
         if not adapter.capabilities().get('resume',{}).get('supported'): return 'resume_unsupported'
-        next_data={'recovery_count':count+1,'recovery_due':now+settings['backoff_seconds']*(2**count),'resume_message_id':str(uuid.uuid4())}
+        jitter=.9+int(hashlib.sha256((attempt['id']+str(count)).encode()).hexdigest()[:4],16)/65535*.2
+        next_data={'recovery_count':count+1,'recovery_due':now+settings['backoff_seconds']*(2**count)*jitter,'resume_message_id':str(uuid.uuid4())}
         # Persist the bound before network I/O; a crash cannot reset the budget.
         self.repo.update_attempt(attempt['id'],'awaiting_output',data=next_data,now=now)
         task=self.repo.get(attempt['task'])
@@ -107,7 +114,7 @@ class Scheduler:
                         continue
                     if not attempt['session']: continue
                     observation=adapter.observe(attempt['session'])
-                    self._record(project_id,'provider_observed',{'account':attempt['account'],**{k:observation.get(k) for k in ('status','model','effort')}},attempt['task'],attempt['id'],now)
+                    self._record(project_id,'provider_observed',{'account':attempt['account'],**{k:observation.get(k) for k in ('status','model','effort','last_event_age_ms','relay_alive')}},attempt['task'],attempt['id'],now)
                     if attempt['state']=='cancel_pending':
                         if observation.get('status') in ('cancelled','canceled'):
                             self.repo.update_attempt(attempt['id'],'cancelled',now=now)
@@ -119,6 +126,12 @@ class Scheduler:
                     if artifact is not None:
                         decisions.append(self._validate(attempt,artifact,now)); continue
                     status=observation.get('status','unknown')
+                    age=observation.get('last_event_age_ms')
+                    if status=='running' and type(age) is int and age>=settings['stall_seconds']*1000:
+                        if attempt['data'].get('incident_kind')!='stalled':self.repo.update_attempt(attempt['id'],attempt['state'],data={'incident_kind':'stalled'},now=now)
+                        decisions.append({'task':attempt['task'],'action':'stalled_needs_inspection'})
+                    elif attempt['data'].get('incident_kind') and ((status=='running' and type(age) is int and age<settings['stall_seconds']*1000) or status in ('idle','failed','completed')):
+                        self.repo.update_attempt(attempt['id'],attempt['state'],data={'incident_kind':None},now=now)
                     if status in ('idle','failed','completed'):
                         action=self._recover(attempt,adapter,status,settings,now) if managed and status=='failed' and attempt['state']!='blocked' else 'awaiting_saved_output'
                         decisions.append({'task':attempt['task'],'action':action})

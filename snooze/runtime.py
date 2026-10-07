@@ -19,7 +19,7 @@ from snooze.transport import LightSprint
 from snooze.validation import ValidatorRegistry
 
 
-ALERT_STATES = {'idle','failed','unavailable','ownership_unknown','unknown','verification_unavailable'}
+ALERT_STATES = {'idle','failed','unavailable','ownership_unknown','unknown','verification_unavailable','stalled'}
 
 
 class Runtime:
@@ -94,6 +94,7 @@ class Runtime:
             observation=json.loads(observed['data']) if observed else {}
             if attempt['state'] in ('blocked','ambiguous'):
                 observation={'status':'failed' if attempt['state']=='blocked' else 'ownership_unknown'}
+            elif attempt['data'].get('incident_kind')=='stalled':observation={'status':'stalled'}
             elif attempt['task'] in errors:
                 observation={'status':'verification_unavailable'}
             workers.append({'id':'attempt:'+attempt['id'],'session_id':attempt['session'],'server_key':attempt['account'],
@@ -129,6 +130,8 @@ class Runtime:
         if not self.lock.acquire(False): raise RuntimeError('Check already running')
         started = time.time()
         try:
+            settings=self.scheduler.settings(project)
+            self.monitor.max_workers=settings['observation_workers'];self.transport.timeout=settings['request_timeout']
             self.import_queue()
             with self.repo.connection(True) as c: self.repo.event(c,project,'monitor_started',{},now=started)
             result = self.monitor.check(project)
